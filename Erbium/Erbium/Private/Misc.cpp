@@ -4,6 +4,7 @@
 #include <algorithm>
 #include "../Public/Configuration.h"
 #include "../../FortniteGame/Public/FortPlayerControllerAthena.h"
+#include "../../Engine/Public/NetDriver.h"
 
 int Misc::GetNetMode() 
 {
@@ -20,7 +21,8 @@ void* Misc::SendRequestNow(void* Arg1, void* MCPData, int)
 }
 
 
-float Misc::GetMaxTickRate(UEngine* Engine, float DeltaTime, bool bAllowFrameRateSmoothing) {
+float Misc::GetMaxTickRate(UEngine* Engine, float DeltaTime, bool bAllowFrameRateSmoothing)
+{
 	// improper, DS is supposed to do hitching differently
 	return std::clamp(1.f / DeltaTime, 1.f, FConfiguration::MaxTickRate);
 }
@@ -97,6 +99,7 @@ void ClientThread()
 				{
 					PlayerController->CheatManager = UGameplayStatics::SpawnObject(PlayerController->CheatClass, PlayerController);
 					PlayerController->CheatManager->ObjectFlags &= ~0x1000000;
+					TUObjectArray::GetItemByIndex(PlayerController->CheatManager->Index)->Flags &= ~0x4000000;
 				}
 			}
 		}
@@ -110,46 +113,82 @@ void ClientThread()
 void Misc::InitClient()
 {
 	UEngine::GetEngine()->GameViewport->ViewportConsole = UGameplayStatics::SpawnObject(UEngine::GetEngine()->ConsoleClass, UEngine::GetEngine()->GameViewport);
+	
+	auto PrimarySlot = uint8_t(EPlaylistUIExtensionSlot::StaticEnum() ? EPlaylistUIExtensionSlot::GetPrimary() : EUIExtensionSlot::GetPrimary());
 
-	auto ArenaUI = UKismetStringLibrary::Conv_StringToName(FString(L"/Game/UI/Competitive/Arena/ArenaScoringHUD.ArenaScoringHUD_C"));
-	FUIExtension ArenaUIExtension{};
-	ArenaUIExtension.Slot = 0;
-	ArenaUIExtension.WidgetClass.ObjectID.AssetPathName = ArenaUI;
-
-	auto ShowdownUI = UKismetStringLibrary::Conv_StringToName(FString(L"/Game/UI/Frontend/Showdown/ShowdownScoringHUD.ShowdownScoringHUD_C"));
-	FUIExtension ShowdownUIExtension{};
-	ShowdownUIExtension.Slot = 0;
-	ShowdownUIExtension.WidgetClass.ObjectID.AssetPathName = ShowdownUI;
-
-	auto AIKillsUI = UKismetStringLibrary::Conv_StringToName(FString(L"/Game/Athena/HUD/AthenaAIKillsWidget.AthenaAIKillsWidget_C"));
-	FUIExtension AIKillsUIExtension{};
-	AIKillsUIExtension.Slot = 2;
-	AIKillsUIExtension.WidgetClass.ObjectID.AssetPathName = AIKillsUI;
-
-	TArray<FUIExtension> ArenaExtensions, ShowdownExtensions;
-	ArenaExtensions.Add(ArenaUIExtension);
-	ShowdownExtensions.Add(ShowdownUIExtension);
-	ShowdownExtensions.Add(AIKillsUIExtension);
-		
-	/*auto PlaylistClass = FindClass("FortPlaylistAthena");
-
-	for (int i = 0; i < TUObjectArray::Num(); i++)
+	if (VersionInfo.FortniteVersion >= 10 || FConfiguration::bForceRespawns)
 	{
-		auto Object = TUObjectArray::GetObjectByIndex(i);
-		if (Object && Object->IsA((UClass*)PlaylistClass))
-		{
-			auto Playlist = (UFortPlaylistAthena*)Object;
+		TArray<FUIExtension> ArenaExtensions, ShowdownExtensions;
 
-			auto Name = Object->Name.ToString();
-			if (Name.contains("Showdown"))
-				Playlist->UIExtensions = Name.contains("ShowdownAlt") ? ArenaExtensions : ShowdownExtensions;
+		if (VersionInfo.FortniteVersion >= 10)
+		{
+			FUIExtension ArenaUIExtension{};
+			ArenaUIExtension.Slot = PrimarySlot;
+			if (VersionInfo.FortniteVersion < 23)
+				ArenaUIExtension.WidgetClass.ObjectID.AssetPathName = FName(L"/Game/UI/Competitive/Arena/ArenaScoringHUD.ArenaScoringHUD_C");
+			else
+			{
+				auto& PackageName = *(FName*)(__int64(&ArenaUIExtension.WidgetClass) + (VersionInfo.EngineVersion < 5.2 ? 0xC : 0x8));
+				auto& AssetName = *(FName*)(__int64(&ArenaUIExtension.WidgetClass) + (VersionInfo.EngineVersion < 5.2 ? 0x10 : 0xC));
+
+				PackageName = FName(L"/Game/UI/Competitive/Arena/ArenaScoringHUD");
+				AssetName = FName(L"ArenaScoringHUD_C");
+			}
+
+			FUIExtension ShowdownUIExtension{};
+			ShowdownUIExtension.Slot = PrimarySlot;
+			if (VersionInfo.FortniteVersion < 23)
+				ShowdownUIExtension.WidgetClass.ObjectID.AssetPathName = FName(L"/Game/UI/Frontend/Showdown/ShowdownScoringHUD.ShowdownScoringHUD_C");
+			else
+			{
+				auto& PackageName = *(FName*)(__int64(&ArenaUIExtension.WidgetClass) + (VersionInfo.EngineVersion < 5.2 ? 0xC : 0x8));
+				auto& AssetName = *(FName*)(__int64(&ArenaUIExtension.WidgetClass) + (VersionInfo.EngineVersion < 5.2 ? 0x10 : 0xC));
+
+				PackageName = FName(L"/Game/UI/Competitive/Arena/ShowdownScoringHUD");
+				AssetName = FName(L"ShowdownScoringHUD_C");
+			}
+
+			ArenaExtensions.Add(ArenaUIExtension);
+			ShowdownExtensions.Add(ShowdownUIExtension);
 		}
-	}*/
+
+		auto PlaylistClass = FindClass("FortPlaylistAthena");
+
+		for (int i = 0; i < TUObjectArray::Num(); i++)
+		{
+			auto Object = TUObjectArray::GetObjectByIndex(i);
+
+			if (Object && Object->IsA((UClass*)PlaylistClass))
+			{
+				auto Playlist = (UFortPlaylistAthena*)Object;
+
+				if (FConfiguration::bForceRespawns)
+				{
+					Playlist->bRespawnInAir = true;
+					Playlist->RespawnHeight.Curve.CurveTable = nullptr;
+					Playlist->RespawnHeight.Curve.RowName = FName();
+					Playlist->RespawnHeight.Value = 20000;
+					Playlist->RespawnTime.Curve.CurveTable = nullptr;
+					Playlist->RespawnTime.Curve.RowName = FName();
+					Playlist->RespawnTime.Value = 3;
+					Playlist->RespawnType = 1; // InfiniteRespawns
+					if (Playlist->HasbForceRespawnLocationInsideOfVolume())
+						Playlist->bForceRespawnLocationInsideOfVolume = true;
+				}
+				if (VersionInfo.FortniteVersion >= 10)
+				{
+					auto Name = Object->Name.ToString();
+					if (Name.contains("Showdown"))
+						Playlist->UIExtensions = Name.contains("ShowdownAlt") ? ArenaExtensions : ShowdownExtensions;
+				}
+			}
+		}
+	}
 
 	if (VersionInfo.FortniteVersion < 20)
 	{
-		auto SelectEditAddr = Memcury::Scanner::FindStringRef(L"EditModeInputComponent0").ScanFor({ 0x48, 0x8D, 0x05 }, true, 1).RelativeOffset(3).GetAs<void*>();
-		auto SelectResetAddr = Memcury::Scanner::FindStringRef(L"EditModeInputComponent0").ScanFor({ 0x48, 0x8D, 0x05 }, true, 2).RelativeOffset(3).GetAs<void*>();
+		auto SelectEditAddr = Memcury::Scanner::FindStringRef(L"EditModeInputComponent0").ScanFor({ 0x48, 0x8D, 0x05 }, true, 1).RelativeOffset(3).Get();
+		auto SelectResetAddr = Memcury::Scanner::FindStringRef(L"EditModeInputComponent0").ScanFor({ 0x48, 0x8D, 0x05 }, true, 2).RelativeOffset(3).Get();
 
 		auto sRef = Memcury::Scanner::FindStringRef("CompleteBuildingEditInteraction", true, VersionInfo.EngineVersion >= 4.27).Get();
 		uintptr_t CompleteBuildingEditInteractionLea = 0;
@@ -173,28 +212,181 @@ void Misc::InitClient()
 		MH_Initialize();
 
 		if (VersionInfo.FortniteVersion < 11)
-			MH_CreateHook(SelectEditAddr, SelectEdit, (LPVOID*)&SelectEditOG);
+			Utils::Hook(SelectEditAddr, SelectEdit, SelectEditOG);
 		if (VersionInfo.FortniteVersion < 24.40)
-			MH_CreateHook(SelectResetAddr, SelectReset, (LPVOID*)&SelectResetOG);
+			Utils::Hook(SelectResetAddr, SelectReset, SelectResetOG);
 
 		MH_EnableHook(MH_ALL_HOOKS);
+	}
+
+	if (FConfiguration::bForceRespawns)
+	{
+
 	}
 
 	CreateThread(0, 0, (LPTHREAD_START_ROUTINE)ClientThread, 0, 0, 0);
 }
 
+class UIpNetDriver : public UNetDriver
+{
+public:
+	UCLASS_COMMON_MEMBERS(UIpNetDriver);
+};
+
+void PatchAllNetModes(uintptr_t AttemptDeriveFromURL)
+{
+	Memcury::PE::Address add{ nullptr };
+
+	const auto sizeOfImage = Memcury::PE::GetNTHeaders()->OptionalHeader.SizeOfImage;
+	const auto scanBytes = reinterpret_cast<std::uint8_t*>(Memcury::PE::GetModuleBase());
+
+	for (auto i = 0ul; i < sizeOfImage - 5; ++i)
+	{
+		if (scanBytes[i] == 0xE8 || scanBytes[i] == 0xE9)
+		{
+			if (Memcury::PE::Address(&scanBytes[i]).RelativeOffset(1).GetAs<void*>() == (void*)AttemptDeriveFromURL)
+			{
+				add = Memcury::PE::Address(&scanBytes[i]);
+
+				// scan for the read of World->NetDriver
+
+				for (auto j = 0; j > -0x100000; j--) // so we find everything. no func is actually 1mb
+				{
+					if ((scanBytes[i + j] & 0xF8) == 0x48 && ((scanBytes[i + j + 1] & 0xFC) == 0x80 || (scanBytes[i + j + 1] & 0xF8) == 0x38) && (scanBytes[i + j + 2] & 0xF0) != 0xC0 && scanBytes[i + j + 2] != 0x65 && scanBytes[i + j + 3] == 0x38)
+					{
+						// now, scan for if (NetDriver) return NM_Client;
+
+						bool found = false;
+						for (auto k = 4; k < 0x104; k++)
+						{
+							if (scanBytes[i + j + k] == 0x75)
+							{
+								auto Scuffness = __int64(&scanBytes[i + j + k + 5]);
+
+								if (*(uint32_t*)Scuffness != 0xF0 && (scanBytes[i + j + k + 4] != 0xC || scanBytes[i + j + k + 5] != 0xB) && scanBytes[i + j + k + 4] != 0x09)
+									continue;
+
+								Utils::Patch<uint16_t>(__int64(&scanBytes[i + j + k]), 0x9090);
+								if ((scanBytes[i + j + 1] & 0xF8) == 0x38)
+									Utils::Patch<uint32_t>(__int64(&scanBytes[i + j]), 0x90909090);
+								else if ((scanBytes[i + j + 1] & 0xFC) == 0x80)
+								{
+									Utils::Patch<uint32_t>(__int64(&scanBytes[i + j]), 0x90909090);
+									Utils::Patch<uint8_t>(__int64(&scanBytes[i + j + 4]), 0x90);
+								}
+								found = true;
+								break;
+							}
+							else if (scanBytes[i + j + k] == 0x74)	
+							{
+								auto Scuffness = __int64(&scanBytes[i + j + k]);
+								Scuffness = (Scuffness + 2) + *(int8_t*)(Scuffness + 1);
+								\
+								if (*(uint32_t*)(Scuffness + 3) != 0xF0 && (*(uint8_t*)(Scuffness + 2) != 0xC || *(uint8_t*)(Scuffness + 3) != 0xB) && *(uint8_t*)(Scuffness + 2) != 0x09)
+									continue;
+
+								Utils::Patch<uint8_t>(__int64(&scanBytes[i + j + k]), 0xeb);
+								if ((scanBytes[i + j + 1] & 0xF8) == 0x38)
+									Utils::Patch<uint32_t>(__int64(&scanBytes[i + j]), 0x90909090);
+								else if ((scanBytes[i + j + 1] & 0xFC) == 0x80)
+								{
+									Utils::Patch<uint32_t>(__int64(&scanBytes[i + j]), 0x90909090);
+									Utils::Patch<uint8_t>(__int64(&scanBytes[i + j + 4]), 0x90);
+								}
+								found = true;
+								break;
+							}
+							else if (scanBytes[i + j + k] == 0x0F  && scanBytes[i + j + k + 1] == 0x85)
+							{
+								auto Scuffness = __int64(&scanBytes[i + j + k + 9]);
+
+								if (*(uint32_t*)Scuffness != 0xF0 && (scanBytes[i + j + k + 8] != 0xC || scanBytes[i + j + k + 9] != 0xB) && scanBytes[i + j + k + 8] != 0x09)
+									continue;
+
+								Utils::Patch<uint32_t>(__int64(&scanBytes[i + j + k]), 0x90909090);
+								Utils::Patch<uint16_t>(__int64(&scanBytes[i + j + k + 4]), 0x9090);
+								if ((scanBytes[i + j + 1] & 0xF8) == 0x38)
+									Utils::Patch<uint32_t>(__int64(&scanBytes[i + j]), 0x90909090);
+								else if ((scanBytes[i + j + 1] & 0xFC) == 0x80)
+								{
+									Utils::Patch<uint32_t>(__int64(&scanBytes[i + j]), 0x90909090);
+									Utils::Patch<uint8_t>(__int64(&scanBytes[i + j + 4]), 0x90);
+								}
+								found = true;
+								break;
+							}
+							else if (scanBytes[i + j + k] == 0x0F && scanBytes[i + j + k + 1] == 0x84)
+							{
+								auto Scuffness = __int64(&scanBytes[i + j + k]);
+								Scuffness = (Scuffness + 6) + *(int32_t*)(Scuffness + 2);
+
+								if (*(uint32_t*)(Scuffness + 3) != 0xF0 && (*(uint8_t*)(Scuffness + 2) != 0xC || *(uint8_t*)(Scuffness + 3) != 0xB) && *(uint8_t*)(Scuffness + 2) != 0x09)
+									continue;
+
+								Utils::Patch<uint16_t>(__int64(&scanBytes[i + j + k]), 0xe990);
+								if ((scanBytes[i + j + 1] & 0xF8) == 0x38)
+									Utils::Patch<uint32_t>(__int64(&scanBytes[i + j]), 0x90909090);
+								else if ((scanBytes[i + j + 1] & 0xFC) == 0x80)
+								{
+									Utils::Patch<uint32_t>(__int64(&scanBytes[i + j]), 0x90909090);
+									Utils::Patch<uint8_t>(__int64(&scanBytes[i + j + 4]), 0x90);
+								}
+								found = true;
+								break;
+							}
+						}
+						if (found)
+							break;
+					}
+				}
+			}
+		}
+	}
+}
+
+bool RetFalse()
+{
+	return false;
+}
+
 void Misc::Hook()
 {
-	Utils::Hook(FindGetNetMode(), GetNetMode);
+	if (VersionInfo.FortniteVersion >= 25 && VersionInfo.FortniteVersion < 28)
+	{
+		auto AttemptDeriveFromURL = Memcury::Scanner::FindPattern("48 89 5C 24 ? 55 56 57 41 54 41 55 41 56 41 57 48 81 EC ? ? ? ? 4C 8B C1").Get();
+		if (!AttemptDeriveFromURL)
+			AttemptDeriveFromURL = Memcury::Scanner::FindPattern("48 89 5C 24 ? 55 56 57 41 54 41 55 41 56 41 57 48 81 EC ? ? ? ? 4C 8B D1").Get();
+		if (!AttemptDeriveFromURL)
+			AttemptDeriveFromURL = Memcury::Scanner::FindPattern("48 89 5C 24 ? 55 56 57 41 54 41 55 41 56 41 57 48 81 EC ? ? ? ? 48 8B D1").Get();
+		Utils::Hook(AttemptDeriveFromURL, GetNetMode);
+		Utils::Hook(Memcury::Scanner::FindPattern("48 83 EC ? 48 8B 01 FF 90 ? ? ? ? 84 C0 0F 85").Get(), GetNetMode);
+		PatchAllNetModes(AttemptDeriveFromURL);
+	}
+	else
+		Utils::Hook(FindGetNetMode(), GetNetMode);
+
 	Utils::Hook(FindSendRequestNow(), SendRequestNow, SendRequestNowOG);
 	Utils::Hook(FindGetMaxTickRate(), GetMaxTickRate);
 	if (VersionInfo.FortniteVersion >= 17)
-		Utils::Hook(Memcury::Scanner::FindPattern("48 89 5C 24 10 48 89 6C 24 20 56 57 41 54 41 56 41 57 48 81 EC ? ? ? ? 65 48 8B 04 25 ? ? ? ? 4C 8B F9").Get(), CheckCheckpointHeartBeat);
+	{
+		auto pattern = Memcury::Scanner::FindPattern("48 89 5C 24 10 48 89 6C 24 20 56 57 41 54 41 56 41 57 48 81 EC ? ? ? ? 65 48 8B 04 25 ? ? ? ? 4C 8B F9").Get();
 
+		if (!pattern)
+			pattern = Memcury::Scanner::FindPattern("48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 41 54 41 55 41 56 41 57 48 81 EC ? ? ? ? 65 48 8B 04 25 ? ? ? ? 4C 8B E9").Get();
+
+		if (!pattern)
+			pattern = Memcury::Scanner::FindPattern("48 89 5C 24 ? 48 89 6C 24 ? 56 57 41 54 41 55 41 56 48 81 EC ? ? ? ? 65 48 8B 04 25").Get();
+
+		Utils::Hook(pattern, CheckCheckpointHeartBeat);
+	}
 	if (VersionInfo.EngineVersion < 4.20)
 	{
 		auto ApplyHomebaseEffectsOnPlayerSetupAddr = Memcury::Scanner::FindPattern("40 55 53 57 41 54 41 56 41 57 48 8D 6C 24 ? 48 81 EC ? ? ? ? 48 8B 05 ? ? ? ? 48 33 C4 48 89 45 00 4C 8B").Get();
 
 		Utils::Hook(ApplyHomebaseEffectsOnPlayerSetupAddr, ApplyHomebaseEffectsOnPlayerSetup, ApplyHomebaseEffectsOnPlayerSetupOG);
+	}
+	if (VersionInfo.FortniteVersion >= 26 && VersionInfo.FortniteVersion < 28)
+	{
+		Utils::Hook(Memcury::Scanner::FindPattern("48 89 5C ? ? 57 48 83 EC ? 48 8B D1 48 85 C9 74 ?").Get(), RetFalse);
 	}
 }

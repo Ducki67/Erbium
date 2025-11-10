@@ -248,6 +248,23 @@ public:
     UCLASS_COMMON_MEMBERS(IFortInventoryOwnerInterface);
 };
 
+struct FFortWorldMultiItemInfo
+{
+public:
+    USCRIPTSTRUCT_COMMON_MEMBERS(FFortWorldMultiItemInfo);
+
+    DEFINE_STRUCT_PROP(ItemDefinition, TSoftObjectPtr<UFortItemDefinition>);
+    DEFINE_STRUCT_PROP(RequiredXPForNextLevel, FScalableFloat);
+};
+
+class UFortWorldMultiItemDefinition : public UFortWorldItemDefinition
+{
+public:
+    UCLASS_COMMON_MEMBERS(UFortWorldMultiItemDefinition);
+
+    DEFINE_PROP(ItemInfos, TArray<FFortWorldMultiItemInfo>);
+};
+
 class UFortWeaponMeleeItemDefinition : public UFortWeaponItemDefinition
 {
 public:
@@ -312,14 +329,15 @@ public:
     UFortWorldItem* GiveItem(FFortItemEntry&, int = -1, bool = true, bool = true);
     void Update(FFortItemEntry*);
     void Remove(FGuid);
-    static AFortPickupAthena* SpawnPickup(FVector, FFortItemEntry&, long long = EFortPickupSourceTypeFlag::GetOther(), long long = EFortPickupSpawnSource::GetUnset(), AFortPlayerPawnAthena* = nullptr, int = -1, bool = true, bool = true, bool = true);
-    static AFortPickupAthena* SpawnPickup(FVector, const UFortItemDefinition*, int, int, long long = EFortPickupSourceTypeFlag::GetOther(), long long = EFortPickupSpawnSource::GetUnset(), AFortPlayerPawnAthena* = nullptr, bool = true, bool = true);
+    static AFortPickupAthena* SpawnPickup(FVector, FFortItemEntry&, long long = EFortPickupSourceTypeFlag::GetOther(), long long = EFortPickupSpawnSource::GetUnset(), AFortPlayerPawnAthena* = nullptr, int = -1, bool = true, bool = true, bool = true, const UClass* = nullptr);
+    static AFortPickupAthena* SpawnPickup(FVector, const UFortItemDefinition*, int, int, long long = EFortPickupSourceTypeFlag::GetOther(), long long = EFortPickupSpawnSource::GetUnset(), AFortPlayerPawnAthena* = nullptr, bool = true, bool = true, const UClass* = nullptr);
     static AFortPickupAthena* SpawnPickup(ABuildingContainer*, FFortItemEntry&, AFortPlayerPawnAthena* = nullptr, int = -1);
     static FFortItemEntry* MakeItemEntry(const UFortItemDefinition*, int32, int32);
     static FFortRangedWeaponStats* GetStats(UFortWeaponItemDefinition*);
     static bool IsPrimaryQuickbar(const UFortItemDefinition*);
     void UpdateEntry(FFortItemEntry&);
     void SetRequiresUpdate();
+    static void RemoveWeaponAbilities(AActor*);
 
     InitPostLoadHooks;
 };

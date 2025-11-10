@@ -49,6 +49,7 @@ public:
     DEFINE_PROP(SquadId, uint8);
     DEFINE_PROP(TeamIndex, uint8);
     DEFINE_PROP(UniqueId, FUniqueNetIdRepl);
+    DEFINE_PROP(UniqueID, FUniqueNetIdRepl);
     DEFINE_PROP(PawnDeathLocation, FVector);
     DEFINE_PROP(DeathInfo, FDeathInfo);
     DEFINE_PROP(Kills, int32);
@@ -59,7 +60,9 @@ public:
     DEFINE_PROP(SeasonLevelUIDisplay, int32);
     DEFINE_PROP(CharacterParts, const UObject**);
     DEFINE_PROP(HeroType, const UObject*);
-    DEFINE_PROP(bIsABot, bool);
+    DEFINE_BITFIELD_PROP(bIsABot);
+    DEFINE_BITFIELD_PROP(bIsSpectator);
+    DEFINE_PROP(WorldPlayerId, int16);
 
     DEFINE_FUNC(OnRep_SquadId, void);
     DEFINE_FUNC(OnRep_DeathInfo, void);

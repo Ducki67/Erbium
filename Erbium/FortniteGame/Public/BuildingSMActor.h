@@ -1,8 +1,8 @@
 #pragma once
 #include "../../pch.h"
-#include "FortPlayerControllerAthena.h"
+#include "FortPlayerStateAthena.h"
 #include "GameplayTagContainer.h"
-#include "FortWeapon.h"
+#include "../../Engine/Public/CurveTable.h"
 
 enum class EFortResourceType : uint8
 {
@@ -22,6 +22,17 @@ public:
     TArray<void*>                                 MeshSets;                                          // 0x0008(0x0010)(Edit, BlueprintVisible, ZeroConstructor, DisableEditOnInstance, NativeAccessSpecifierPublic)
 };
 
+inline uint64_t GetSparseClassData_ = 0;
+
+struct FBuildingSMActorClassData
+{
+public:
+    USCRIPTSTRUCT_COMMON_MEMBERS(FBuildingSMActorClassData);
+
+    DEFINE_STRUCT_PROP(BuildingResourceAmountOverride, FCurveTableRowHandle);
+    DEFINE_STRUCT_PROP(AlternateMeshes, TArray<FTierMeshSets>);
+};
+
 class ABuildingSMActor : public AActor
 {
 public:
@@ -37,6 +48,19 @@ public:
     DEFINE_PROP(CurrentBuildingLevel, int32);
     DEFINE_BITFIELD_PROP(bAllowResourceDrop);
     DEFINE_PROP(AlternateMeshes, TArray<FTierMeshSets>);
+    DEFINE_BITFIELD_PROP(bPersistToWorld);
+    DEFINE_BITFIELD_PROP(bAutoReleaseCurieContainerOnDestroyed);
+    DEFINE_PROP(BuildingReplacementType, uint8_t);
+    DEFINE_PROP(ReplacementDestructionReason, uint8_t);
+    DEFINE_PROP(OnReplacementDestruction, TMulticastInlineDelegate<void(uint8_t, ABuildingSMActor*)>);
+
+    FBuildingSMActorClassData* GetClassData() const
+    {
+        FBuildingSMActorClassData* (*GetSparseClassDataOG)(UObject *, uint8) = decltype(GetSparseClassDataOG)(GetSparseClassData_);
+
+        return GetSparseClassDataOG(Class, 1);
+    }
+
 
     DEFINE_FUNC(GetHealth, float);
     DEFINE_FUNC(GetMaxHealth, float);
@@ -44,13 +68,18 @@ public:
     DEFINE_FUNC(InitializeKismetSpawnedBuildingActor, void);
     DEFINE_FUNC(GetHealthPercent, float);
     DEFINE_FUNC(RepairBuilding, void);
+    DEFINE_FUNC(SilentDie, void);
+    DEFINE_FUNC(OnRep_CurrentBuildingLevel, void);
+    DEFINE_STATIC_FUNC(K2_SpawnBuildingActor, ABuildingSMActor*);
     
-    DefHookOg(void, OnDamageServer, ABuildingSMActor*, float, FGameplayTagContainer, FVector, __int64, AFortPlayerControllerAthena*, AActor*, __int64);
+    DefHookOg(void, OnDamageServer, ABuildingSMActor*, float, FGameplayTagContainer, FVector, __int64, AActor*, AActor*, __int64);
+    DefUHookOg(ServerSpawnDeco);
+    DefUHookOg(ServerSpawnDeco_Implementation);
 
     InitPostLoadHooks;
 };
 
-class AFortWeap_EditingTool : public AFortWeapon
+class AFortWeap_EditingTool : public AActor
 {
 public:
     UCLASS_COMMON_MEMBERS(AFortWeap_EditingTool);

@@ -52,6 +52,18 @@ uint64 FindGetNamePool();
 uint64 FindIsNetReady();
 uint64 FindSpawnInitialSafeZone();
 uint64 FindUpdateSafeZonesPhase();
+uint64 FindUpdateIrisReplicationViews();
+uint64 FindPreSendUpdate();
+uint64 FindHandleMatchHasStarted();
+uint64 FindInitializeBuildingActor();
+uint64 FindPostInitializeSpawnedBuildingActor();
+uint64 FindInitializeFlightPath();
+uint64 FindReset();
+uint64 FindNotifyGameMemberAdded();
+uint64 FindSetGamePhase();
+uint64 FindPayBuildableClassPlacementCost();
+uint64 FindCanAffordToPlaceBuildableClass();
+uint64 FindCanPlaceBuildableClassInStructuralGrid();
 
 inline std::vector<uint64_t> NullFuncs = {};
 inline std::vector<uint64_t> RetTrueFuncs = {};

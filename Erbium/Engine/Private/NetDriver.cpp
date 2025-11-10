@@ -4,6 +4,7 @@
 #include "../../FortniteGame/Public/FortGameModeAthena.h"
 #include "../../Erbium/Public/GUI.h"
 #include "../../Erbium/Public/Configuration.h"
+#include "../../FortniteGame/Public/BattleRoyaleGamePhaseLogic.h"
 
 uint32_t NetworkObjectListOffset = 0;
 uint32_t ReplicationFrameOffset = 0;
@@ -13,6 +14,23 @@ uint32_t DestroyedStartupOrDormantActorGUIDsOffset = 0;
 uint32_t ClientVisibleLevelNamesOffset = 0;
 
 std::unordered_map<UNetConnection*, TArray<FNetViewer*>> ViewerMap;
+
+
+const ULevel* GetLevel(const AActor* Actor)
+{
+	auto Outer = Actor->Outer;
+
+	while (Outer)
+	{
+		if (Outer->Class == ULevel::StaticClass())
+			return (ULevel*)Outer;
+		else
+			Outer = Outer->Outer;
+	}
+
+	return nullptr;
+}
+
 
 void BuildViewerMap(UNetDriver* Driver)
 {
@@ -121,9 +139,11 @@ bool IsActorRelevantToConnection(const AActor* Actor, const TArray<FNetViewer*>&
 
 bool IsLevelInitializedForActor(const UNetDriver* NetDriver, const AActor* InActor, UNetConnection* InConnection)
 {
-	static bool (*ClientHasInitializedLevelFor)(const UNetConnection*, const AActor*) = decltype(ClientHasInitializedLevelFor)(FindClientHasInitializedLevelFor());
+	static bool (*ClientHasInitializedLevelFor)(const UNetConnection*, const UObject*) = decltype(ClientHasInitializedLevelFor)(FindClientHasInitializedLevelFor());
 
-	const bool bCorrectWorld = NetDriver->WorldPackage != nullptr && (!ClientWorldPackageNameOffset || *(FName*)(__int64(InConnection) + ClientWorldPackageNameOffset) == NetDriver->WorldPackage->Name) && (!ClientHasInitializedLevelFor || ClientHasInitializedLevelFor(InConnection, InActor));
+	const bool bCorrectWorld = NetDriver->WorldPackage != nullptr && 
+		(!ClientWorldPackageNameOffset || *(FName*)(__int64(InConnection) + ClientWorldPackageNameOffset) == NetDriver->WorldPackage->Name) && 
+		(!ClientHasInitializedLevelFor || ClientHasInitializedLevelFor(InConnection, InActor));
 	const bool bIsConnectionPC = (InActor == InConnection->PlayerController);
 	return bCorrectWorld || bIsConnectionPC;
 }
@@ -133,6 +153,8 @@ struct FPrioActor
 	FNetworkObjectInfo* ActorInfo;
 	UActorChannel* Channel;
 	float Priority;
+	bool bIsRelevant;
+	bool bLevelInitializedForActor;
 
 	bool operator<(FPrioActor& _Rhs)
 	{
@@ -154,11 +176,12 @@ void ServerReplicateActors(UNetDriver* Driver, float DeltaSeconds)
 	if (ViewerMap.size() == 0)
 		return;
 
-	static FName ActorName = UKismetStringLibrary::Conv_StringToName(FString(L"Actor"));
+	static FName ActorName = FName(L"Actor");
 
 	auto& NetworkObjectList = GetNetworkObjectList(Driver);
 	auto& ActiveNetworkObjects = NetworkObjectList.ActiveNetworkObjects;
 	auto IsNetReady = (int32(*)(UNetConnection*, bool))FindIsNetReady();
+	static auto CloseActorChannel = (void(*)(UActorChannel*, uint8_t)) FindCloseActorChannel();
 
 	for (auto& ViewerPair : ViewerMap)
 	{
@@ -171,19 +194,24 @@ void ServerReplicateActors(UNetDriver* Driver, float DeltaSeconds)
 		PriorityLists[Conn] = List;
 	}
 
+	auto TimeSeconds = UGameplayStatics::GetTimeSeconds(UWorld::GetWorld());
+
+	auto Scale = Driver->NetServerMaxTickRate / FConfiguration::MaxTickRate;
 	FFrame FakeStack;
 	for (auto& ActorInfo : ActiveNetworkObjects)
 	{
-		//if (!ActorInfo->bPendingNetUpdate && Time <= ActorInfo->NextUpdateTime)
+		//if (/*!ActorInfo->bPendingNetUpdate && */TimeSeconds <= ActorInfo->NextUpdateTime)
 		//	continue;
 
 		auto Actor = ActorInfo->Actor;
 
 		if (!Actor || /*!Actor->bActorInitialized || */Actor->NetDriverName != Driver->NetDriverName)
+		{
 			continue;
+		}
 
 		auto Outer = Actor->Outer;
-		if ((VersionInfo.FortniteVersion >= 23.00 ? false : (Actor->bActorIsBeingDestroyed || (TUObjectArray::GetItemByIndex(Actor->Index)->Flags & ((1 << 29) | (1 << 21))))) || Actor->RemoteRole == 0 || ((Actor->HasbNetStartup() ? Actor->bNetStartup : false) && Actor->NetDormancy == 4))
+		if (Actor->bActorIsBeingDestroyed || (TUObjectArray::GetItemByIndex(Actor->Index)->Flags & ((1 << 29) | (1 << 21))) || Actor->RemoteRole == 0 || ((Actor->HasbNetStartup() ? Actor->bNetStartup : false) && Actor->NetDormancy == 4))
 		{
 			//RemoveNetworkActor(&NetworkObjectList, Actor);
 			continue;
@@ -205,25 +233,16 @@ void ServerReplicateActors(UNetDriver* Driver, float DeltaSeconds)
 				break;
 			}
 
-			bool bRelevant = IsActorRelevantToConnection(Actor, Viewers);
 			bool bLevelInitializedForActor = IsLevelInitializedForActor(Driver, Actor, Conn);
-			if (!Channel && (!bRelevant || !bLevelInitializedForActor))
+			if (!Channel && (!bLevelInitializedForActor || !IsActorRelevantToConnection(Actor, Viewers)))
 			{
 				continue;
 			}
-
-			static auto CloseActorChannel = (void(*)(UActorChannel*, uint8_t)) FindCloseActorChannel();
-			if (Channel && !bRelevant && (!bLevelInitializedForActor || !(Actor->HasbNetStartup() ? Actor->bNetStartup : true)))
-			{
-				CloseActorChannel(Channel, 3);
-				continue;
-			}
-
 
 			auto PriorityConn = Conn;
 			bool bDoCullCheck = true;
 
-			if (Actor->bAlwaysRelevant)
+			if (Actor->bAlwaysRelevant || Actor->bTearOff)
 				bDoCullCheck = false;
 
 			if (Actor->bOnlyRelevantToOwner)
@@ -233,9 +252,9 @@ void ServerReplicateActors(UNetDriver* Driver, float DeltaSeconds)
 
 				if (!(PriorityConn = IsActorOwnedByAndRelevantToConnection(Actor, Viewers, bHasNullViewTarget)))
 				{
-					if (!bHasNullViewTarget && Channel != NULL && !bRelevant)
+					if (!bHasNullViewTarget && Channel != NULL && Driver->GetTime() - Channel->GetRelevantTime() >= Driver->RelevantTimeout)
 						CloseActorChannel(Channel, 3);
-
+					
 					continue;
 				}
 			}
@@ -257,13 +276,21 @@ void ServerReplicateActors(UNetDriver* Driver, float DeltaSeconds)
 						((int32(*)(UActorChannel*))FindStartBecomingDormant())(Channel);
 			}
 
-			if (bRelevant && bLevelInitializedForActor)
+			bool bIsRelevant = bLevelInitializedForActor && !Actor->bTearOff && (!Channel || Driver->GetTime() - Channel->GetRelevantTime() > 1.0) && IsActorRelevantToConnection(Actor, Viewers);
+			bool bIsRecentlyRelevant = bIsRelevant || (Channel && Driver->GetTime() - Channel->GetRelevantTime() < Driver->RelevantTimeout);
+
+			if (bIsRecentlyRelevant && (!Channel || Channel->Actor))
 			{
 				bAnyRelevant = true;
 				auto Priority = 0.f;
 
-				static auto PCClass = FindClass("PlayerController");
-				if (Actor->RootComponent && !Actor->IsA(PCClass))
+				bool bIsAController = false;
+				for (auto& Viewer : Viewers)
+				{
+					if (Actor == Viewer->InViewer)
+						bIsAController = true;
+				}
+				if (Actor->RootComponent && bIsAController)
 				{
 					FVector Loc;
 
@@ -298,10 +325,19 @@ void ServerReplicateActors(UNetDriver* Driver, float DeltaSeconds)
 					if (Actor == Viewer->ViewTarget || Actor == Viewer->InViewer)
 						Priority = -(std::numeric_limits<float>::max)();
 
+
 				auto& PriorityList = PriorityLists[Conn];
-				PriorityList.push_back({ ActorInfo.Get(), Channel, Priority });
+				PriorityList.push_back({ ActorInfo.Get(), Channel, Priority, bIsRelevant, bLevelInitializedForActor });
+			}
+
+			if (Channel && !bIsRecentlyRelevant && (Actor->bTearOff || !bLevelInitializedForActor || !(Actor->HasbNetStartup() ? Actor->bNetStartup : false)))
+			{
+				CloseActorChannel(Channel, Actor->bTearOff ? 4 : 3);
+				continue;
 			}
 		}
+
+		//ActorInfo->NextUpdateTime = TimeSeconds + Scale / Actor->NetUpdateFrequency;
 
 		if (bAnyRelevant)
 			((void(*)(AActor*, UNetDriver*)) FindCallPreReplication())(Actor, Driver);
@@ -326,40 +362,67 @@ void ServerReplicateActors(UNetDriver* Driver, float DeltaSeconds)
 		if (DestroyedStartupOrDormantActorGUIDsOffset)
 		{
 			static auto& DestroyedStartupOrDormantActors = *(TMap<uint32, FActorDestructionInfo*>*)(__int64(Driver) + DestroyedStartupOrDormantActorsOffset);
+			static auto& DestroyedStartupOrDormantActors_UE53 = *(TMap<uint64, FActorDestructionInfo*>*)(__int64(Driver) + DestroyedStartupOrDormantActorsOffset);
 			auto& DestroyedStartupOrDormantActorGUIDs = *(TSet<uint32>*)(__int64(Conn) + DestroyedStartupOrDormantActorGUIDsOffset);
+			auto& DestroyedStartupOrDormantActorGUIDs_UE53 = *(TSet<uint64>*)(__int64(Conn) + DestroyedStartupOrDormantActorGUIDsOffset);
 			auto& ClientVisibleLevelNames = *(TSet<int32>*)(__int64(Conn) + ClientVisibleLevelNamesOffset);
 			static auto SetChannelActorForDestroy = (void(*)(UActorChannel*, FActorDestructionInfo*)) FindSetChannelActorForDestroy();
 			static auto SendDestructionInfo = (void(*)(UNetDriver*, UNetConnection*, FActorDestructionInfo*)) FindSendDestructionInfo();
 
-			for (auto& NetGUID : DestroyedStartupOrDormantActorGUIDs)
+			if (VersionInfo.EngineVersion >= 5.3)
 			{
-				auto Equals = [](const uint32& LeftKey, const uint32& RightKey) -> bool
-					{
-						return LeftKey == RightKey;
-					};
-
-				auto DestructionInfoPtr = DestroyedStartupOrDormantActors.Search([&](uint32& GUID, FActorDestructionInfo*& InfoUPtr)
-					{
-						return GUID == NetGUID/* && (InfoUPtr->StreamingLevelName == FName(0) || ClientVisibleLevelNames.Contains(InfoUPtr->StreamingLevelName.ComparisonIndex))*/;
-					});
-
-				if (DestructionInfoPtr)
+				for (auto& NetGUID : DestroyedStartupOrDormantActorGUIDs_UE53)
 				{
-					auto DestructionInfo = *DestructionInfoPtr;
+					auto DestructionInfoPtr = DestroyedStartupOrDormantActors_UE53.Search([&](uint64& GUID, FActorDestructionInfo*& InfoUPtr)
+						{
+							return GUID == NetGUID/* && (InfoUPtr->StreamingLevelName == FName(0) || ClientVisibleLevelNames.Contains(InfoUPtr->StreamingLevelName.ComparisonIndex))*/;
+						});
 
-					if (SetChannelActorForDestroy)
+					if (DestructionInfoPtr)
 					{
-						auto Channel = ((UActorChannel * (*)(UNetConnection*, FName*, uint8_t, int))FindCreateChannel())(Conn, &ActorName, 2, -1);
+						auto DestructionInfo = *DestructionInfoPtr;
 
-						if (Channel)
-							SetChannelActorForDestroy(Channel, DestructionInfo);
+						if (SetChannelActorForDestroy)
+						{
+							auto Channel = ((UActorChannel * (*)(UNetConnection*, FName*, uint8_t, int))FindCreateChannel())(Conn, &ActorName, 2, -1);
+
+							if (Channel)
+								SetChannelActorForDestroy(Channel, DestructionInfo);
+						}
+						else if (SendDestructionInfo)
+							SendDestructionInfo(Driver, Conn, DestructionInfo);
+						//printf("Path: %s\n", DestructionInfo->PathName.ToString().c_str());
 					}
-					else if (SendDestructionInfo)
-						SendDestructionInfo(Driver, Conn, DestructionInfo);
-					//printf("Path: %s\n", DestructionInfo->PathName.ToString().c_str());
 				}
+				DestroyedStartupOrDormantActorGUIDs_UE53.Reset();
 			}
-			DestroyedStartupOrDormantActorGUIDs.Reset();
+			else
+			{
+				for (auto& NetGUID : DestroyedStartupOrDormantActorGUIDs)
+				{
+					auto DestructionInfoPtr = DestroyedStartupOrDormantActors.Search([&](uint32& GUID, FActorDestructionInfo*& InfoUPtr)
+						{
+							return GUID == NetGUID/* && (InfoUPtr->StreamingLevelName == FName(0) || ClientVisibleLevelNames.Contains(InfoUPtr->StreamingLevelName.ComparisonIndex))*/;
+						});
+
+					if (DestructionInfoPtr)
+					{
+						auto DestructionInfo = *DestructionInfoPtr;
+
+						if (SetChannelActorForDestroy)
+						{
+							auto Channel = ((UActorChannel * (*)(UNetConnection*, FName*, uint8_t, int))FindCreateChannel())(Conn, &ActorName, 2, -1);
+
+							if (Channel)
+								SetChannelActorForDestroy(Channel, DestructionInfo);
+						}
+						else if (SendDestructionInfo)
+							SendDestructionInfo(Driver, Conn, DestructionInfo);
+						//printf("Path: %s\n", DestructionInfo->PathName.ToString().c_str());
+					}
+				}
+				DestroyedStartupOrDormantActorGUIDs.Reset();
+			}
 		}
 
 
@@ -384,9 +447,7 @@ void ServerReplicateActors(UNetDriver* Driver, float DeltaSeconds)
 				if (!Channel)
 				{
 					if (VersionInfo.FortniteVersion >= 20)
-					{
 						Channel = ((UActorChannel * (*)(UNetConnection*, FName*, uint8_t, int))FindCreateChannel())(Conn, &ActorName, 2, -1);
-					}
 					else
 						Channel = ((UActorChannel*(*)(UNetConnection*, int, bool, int32_t))FindCreateChannel())(Conn, 2, true, -1);
 
@@ -396,7 +457,10 @@ void ServerReplicateActors(UNetDriver* Driver, float DeltaSeconds)
 
 				if (Channel)
 				{
-					if (IsNetReady && (VersionInfo.FortniteVersion >= 22 || IsNetReady(Conn, false))) // actually uchannel::isnetready
+					if (PriorityActor.bIsRelevant)
+						Channel->GetRelevantTime() = Driver->GetTime() + 0.5 * ((float)rand() / 32767.f);
+
+					if (VersionInfo.FortniteVersion >= 22 || (IsNetReady && IsNetReady(Conn, false))) // actually uchannel::isnetready
 						((int32(*)(UActorChannel*))FindReplicateActor())(Channel);
 					else
 						Actor->ForceNetUpdate();
@@ -406,6 +470,9 @@ void ServerReplicateActors(UNetDriver* Driver, float DeltaSeconds)
 						break;
 					}
 				}
+
+				if (Channel && Actor->bTearOff && (!PriorityActor.bLevelInitializedForActor || !(Actor->HasbNetStartup() ? Actor->bNetStartup : false)))
+					CloseActorChannel(Channel, 4);
 			}
 			i++;
 		}
@@ -428,14 +495,13 @@ void ServerReplicateActors(UNetDriver* Driver, float DeltaSeconds)
 
 void UNetDriver::TickFlush(UNetDriver* Driver, float DeltaSeconds)
 {
-    static auto HasReplicationDriver_ = Driver->HasReplicationDriver();
+	if (VersionInfo.FortniteVersion >= 25.20)
+	{
+		auto GamePhaseLogic = UFortGameStateComponent_BattleRoyaleGamePhaseLogic::Get(UWorld::GetWorld());
+		GamePhaseLogic->Tick();
+	}
 
-	static auto ServerReplicateActors_ = FindServerReplicateActors();
-    if (ServerReplicateActors_ && (HasReplicationDriver_ ? Driver->ReplicationDriver : nullptr))
-    {
-        ((void (*)(UObject*, float)) ServerReplicateActors_)(Driver->ReplicationDriver, DeltaSeconds);
-    }
-	else if (!HasReplicationDriver_ || !ServerReplicateActors_)
+	if (Driver->ClientConnections.Num() > 0)
 		ServerReplicateActors(Driver, DeltaSeconds);
 
     if (GUI::gsStatus == 1 && VersionInfo.FortniteVersion >= 11.00)
@@ -444,7 +510,7 @@ void UNetDriver::TickFlush(UNetDriver* Driver, float DeltaSeconds)
 		auto GameMode = (AFortGameModeAthena*)UWorld::GetWorld()->AuthorityGameMode;
 		auto GameState = (AFortGameStateAthena*)UWorld::GetWorld()->GameState;
 		static auto bSkipAircraft = GameState->CurrentPlaylistInfo.BasePlaylist ? GameState->CurrentPlaylistInfo.BasePlaylist->bSkipAircraft : false;
-        if (!bSkipAircraft && Driver->ClientConnections.Num() > 0 && GameMode->bWorldIsReady && GameState->WarmupCountdownEndTime <= Time)
+        if (!bSkipAircraft && GameState->HasWarmupCountdownEndTime() && Driver->ClientConnections.Num() > 0 && GameMode->bWorldIsReady && GameState->WarmupCountdownEndTime <= Time)
         {
 			GUI::gsStatus = 2;
 
@@ -453,7 +519,8 @@ void UNetDriver::TickFlush(UNetDriver* Driver, float DeltaSeconds)
 	}
 	else if (GUI::gsStatus == 2 && FConfiguration::bAutoRestart)
 	{
-		if (Driver->ClientConnections.Num() == 0)
+		auto WorldNetDriver = UWorld::GetWorld()->NetDriver;
+		if (Driver == WorldNetDriver && Driver->ClientConnections.Num() == 0)
 			TerminateProcess(GetCurrentProcess(), 0);
 	}
 
@@ -461,10 +528,115 @@ void UNetDriver::TickFlush(UNetDriver* Driver, float DeltaSeconds)
 }
 
 
+void UNetDriver::TickFlush__RepGraph(UNetDriver* Driver, float DeltaSeconds)
+{
+	static auto ServerReplicateActors_ = FindServerReplicateActors();
+	if (Driver->ReplicationDriver)
+	{
+		// this is our main netdriver
+		if (Driver->ClientConnections.Num() > 0)
+			((void (*)(UObject*, float)) ServerReplicateActors_)(Driver->ReplicationDriver, DeltaSeconds);
+
+
+		if (GUI::gsStatus == 1 && VersionInfo.FortniteVersion >= 11.00)
+		{
+			auto Time = (float)UGameplayStatics::GetTimeSeconds(UWorld::GetWorld());
+			auto GameMode = (AFortGameModeAthena*)UWorld::GetWorld()->AuthorityGameMode;
+			auto GameState = (AFortGameStateAthena*)UWorld::GetWorld()->GameState;
+			static auto bSkipAircraft = GameState->CurrentPlaylistInfo.BasePlaylist ? GameState->CurrentPlaylistInfo.BasePlaylist->bSkipAircraft : false;
+			if (!bSkipAircraft && Driver->ClientConnections.Num() > 0 && GameMode->bWorldIsReady && GameState->WarmupCountdownEndTime <= Time)
+			{
+				GUI::gsStatus = 2;
+
+				UKismetSystemLibrary::ExecuteConsoleCommand(UWorld::GetWorld(), FString(L"startaircraft"), nullptr);
+			}
+		}
+		else if (GUI::gsStatus == 2 && FConfiguration::bAutoRestart)
+		{
+			if (Driver->ClientConnections.Num() == 0)
+				TerminateProcess(GetCurrentProcess(), 0);
+		}
+	}
+
+	return TickFlushOG(Driver, DeltaSeconds);
+}
+
+
+enum class EReplicationSystemSendPass : unsigned
+{
+	Invalid,
+	PostTickDispatch,
+	TickFlush,
+};
+
+struct FSendUpdateParams
+{
+	EReplicationSystemSendPass SendPass = EReplicationSystemSendPass::TickFlush;
+	float DeltaSeconds = 0.f;
+};
+
+void SendClientMoveAdjustments(UNetDriver* Driver)
+{
+	static auto SendClientAdjustment = (void(*)(AFortPlayerControllerAthena*)) FindSendClientAdjustment();
+	if (SendClientAdjustment)
+	{
+		for (UNetConnection* Connection : Driver->ClientConnections)
+		{
+			if (Connection == nullptr || Connection->ViewTarget == nullptr)
+				continue;
+
+			if (AFortPlayerControllerAthena* PC = Connection->PlayerController)
+				SendClientAdjustment(PC);
+
+			for (UNetConnection* ChildConnection : Connection->Children)
+			{
+				if (ChildConnection == nullptr)
+					continue;
+
+				if (AFortPlayerControllerAthena* PC = ChildConnection->PlayerController)
+					SendClientAdjustment(PC);
+			}
+		}
+	}
+}
+
+void UNetDriver::TickFlush__Iris(UNetDriver* Driver, float DeltaSeconds)
+{
+	auto GamePhaseLogic = UFortGameStateComponent_BattleRoyaleGamePhaseLogic::Get(UWorld::GetWorld());
+	GamePhaseLogic->Tick();
+
+	if (Driver->ClientConnections.Num() > 0)
+	{
+		auto ReplicationSystem = *(UObject**)(__int64(&Driver->ReplicationDriver) + 8);
+
+		if (ReplicationSystem)
+		{
+			static void(*UpdateIrisReplicationViews)(UNetDriver*) = decltype(UpdateIrisReplicationViews)(FindUpdateIrisReplicationViews());
+			static void(*PreSendUpdate)(UObject*, FSendUpdateParams&) = decltype(PreSendUpdate)(FindPreSendUpdate());
+
+			UpdateIrisReplicationViews(Driver);
+			SendClientMoveAdjustments(Driver);
+			FSendUpdateParams Params;
+			Params.DeltaSeconds = DeltaSeconds;
+			PreSendUpdate(ReplicationSystem, Params);
+		}
+	}
+
+	if (GUI::gsStatus == 2 && FConfiguration::bAutoRestart)
+	{
+		auto WorldNetDriver = UWorld::GetWorld()->NetDriver;
+		if (Driver == WorldNetDriver && Driver->ClientConnections.Num() == 0)
+			TerminateProcess(GetCurrentProcess(), 0);
+	}
+
+	return TickFlushOG(Driver, DeltaSeconds);
+}
+
 void (*SetNetDormancyOG)(AActor* Actor, int NewDormancy);
 void SetNetDormancy(AActor* Actor, int NewDormancy)
 {
 	auto Driver = (UNetDriver*)UWorld::GetWorld()->NetDriver;
+
 
 	SetNetDormancyOG(Actor, NewDormancy);
 
@@ -524,6 +696,16 @@ void UNetDriver::PostLoadHook()
 		ReplicationFrameOffset = VersionInfo.FortniteVersion == 24.20 ? 0x438 : 0x440;
 		NetworkObjectListOffset = VersionInfo.FortniteVersion < 24 ? 0x720 : 0x730;
 	}
+	else if (VersionInfo.FortniteVersion >= 25 && VersionInfo.FortniteVersion < 28)
+	{
+		NetworkObjectListOffset = 0x750;
+		ReplicationFrameOffset = 0x458;
+	}
+	else if (VersionInfo.FortniteVersion >= 28)
+	{
+		NetworkObjectListOffset = 0x760;
+		ReplicationFrameOffset = 0x468;
+	}
 
 	if (VersionInfo.FortniteVersion <= 1.72 && VersionInfo.FortniteVersion != 1.1 && VersionInfo.FortniteVersion != 1.11)
 		ClientWorldPackageNameOffset = 0x336A8;
@@ -543,18 +725,30 @@ void UNetDriver::PostLoadHook()
 		ClientWorldPackageNameOffset = 0x1820;
 	else if (VersionInfo.FortniteVersion == 3.3)
 		ClientWorldPackageNameOffset = 0x1828;
-	else if (VersionInfo.FortniteVersion < 24 && VersionInfo.FortniteVersion > 23.10) 
+	else if (VersionInfo.FortniteVersion < 24 && VersionInfo.FortniteVersion > 23.10)
 		ClientWorldPackageNameOffset = 0x17D0;
-	else if (VersionInfo.FortniteVersion >= 23 && VersionInfo.FortniteVersion <= 23.10) 
+	else if (VersionInfo.FortniteVersion >= 23 && VersionInfo.FortniteVersion <= 23.10)
 		ClientWorldPackageNameOffset = 0x1780;
 	else if (std::floor(VersionInfo.FortniteVersion) == 22)
 		ClientWorldPackageNameOffset = 0x1730;
+	else if (VersionInfo.FortniteVersion >= 28)
+		ClientWorldPackageNameOffset = 0x1828;
+	else if (VersionInfo.EngineVersion >= 5.3)
+		ClientWorldPackageNameOffset = 0x1820;
+	else if (VersionInfo.EngineVersion == 5.2)
+		ClientWorldPackageNameOffset = 0x1818;
 	else if (VersionInfo.FortniteVersion >= 24)
 		ClientWorldPackageNameOffset = 0x1820;
 	else if (VersionInfo.FortniteVersion >= 20)
 		ClientWorldPackageNameOffset = 0x16b8;
 
-	if (VersionInfo.FortniteVersion >= 23)
+	if (VersionInfo.FortniteVersion >= 25)
+	{
+		DestroyedStartupOrDormantActorsOffset = VersionInfo.FortniteVersion >= 28 ? 0x328 : 0x318;
+		DestroyedStartupOrDormantActorGUIDsOffset = VersionInfo.FortniteVersion >= 28 ? 0x14b8 : (VersionInfo.EngineVersion == 5.2 ? 0x14a8 : 0x14b0);
+		ClientVisibleLevelNamesOffset = DestroyedStartupOrDormantActorGUIDsOffset + (VersionInfo.FortniteVersion < 24 ? 0x190 : 0x1e0);
+	}
+	else if (VersionInfo.FortniteVersion >= 23)
 	{
 		DestroyedStartupOrDormantActorsOffset = VersionInfo.FortniteVersion >= 24 ? 0x2f8 : 0x300;
 		DestroyedStartupOrDormantActorGUIDsOffset = 0x14b0;
@@ -569,6 +763,14 @@ void UNetDriver::PostLoadHook()
 
 	if (!FindServerReplicateActors())
 	{
+		if (VersionInfo.EngineVersion >= 5.3 && FConfiguration::bEnableIris)
+		{
+			FindSendClientAdjustment();
+			FindUpdateIrisReplicationViews();
+			FindPreSendUpdate();
+			Utils::Hook(FindTickFlush(), TickFlush__Iris, TickFlushOG);
+			return;
+		}
 		// cache
 		FindCreateChannel();
 		FindSetChannelActor();
@@ -592,9 +794,13 @@ void UNetDriver::PostLoadHook()
 		}
 
 		GetActorLocation = (void(*)(AActor*, FFrame&, FVector*))AActor::GetDefaultObj()->GetFunction("K2_GetActorLocation")->GetNativeFunc();
-	}
 
-    Utils::Hook(FindTickFlush(), TickFlush, TickFlushOG); 
+		Utils::Hook(FindTickFlush(), TickFlush, TickFlushOG);
+	}
+	else
+	{
+		Utils::Hook(FindTickFlush(), TickFlush__RepGraph, TickFlushOG);
+	}
 
 	if (VersionInfo.FortniteVersion < 3.4 && FindFlushDormancy())
 	{

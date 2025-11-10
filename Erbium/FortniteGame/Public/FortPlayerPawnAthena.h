@@ -31,12 +31,36 @@ public:
     DEFINE_FUNC(OnRep_PawnUsingHandle, void);
 };
 
+struct FFortGameplayAttributeData
+{
+public:
+    USCRIPTSTRUCT_COMMON_MEMBERS(FFortGameplayAttributeData);
+
+    DEFINE_STRUCT_PROP(CurrentValue, float);
+    DEFINE_STRUCT_PROP(BaseValue, float);
+    DEFINE_STRUCT_PROP(Minimum, float);
+    DEFINE_STRUCT_PROP(Maximum, float);
+    DEFINE_STRUCT_PROP(UnclampedBaseValue, float);
+    DEFINE_STRUCT_PROP(UnclampedCurrentValue, float);
+};
+
+class UFortHealthSet : public UObject
+{
+public:
+    UCLASS_COMMON_MEMBERS(UFortHealthSet);
+
+    DEFINE_PROP(Health, FFortGameplayAttributeData);
+
+    DEFINE_FUNC(OnRep_Health, void);
+};
+
 class AFortPlayerPawnAthena : public AActor
 {
 public:
     UCLASS_COMMON_MEMBERS(AFortPlayerPawnAthena);
 
     DEFINE_PROP(CurrentWeapon, AActor*); // everything breaks if we include FortWeapon.h so
+    DEFINE_PROP(PreviousWeapon, AActor*);
     DEFINE_PROP(Controller, AActor*);
     DEFINE_PROP(IncomingPickups, TArray<AActor*>);
     DEFINE_PROP(CharacterMovement, UCharacterMovementComponent*);
@@ -52,6 +76,15 @@ public:
     DEFINE_PROP(AIControllerClass, TSubclassOf<AActor>);
     DEFINE_PROP(PlayerState, AActor*);
     DEFINE_PROP(BaseEyeHeight, float);
+    DEFINE_PROP(OnHeldObjectPickedUp, TMulticastInlineDelegate<void(AActor*)>);
+    DEFINE_PROP(OnHeldObjectDropped, TMulticastInlineDelegate<void(AActor*)>);
+    DEFINE_PROP(OnEnteredAircraft, TMulticastInlineDelegate<void()>);
+    DEFINE_PROP(PickupSpeedMultiplier, float);
+    DEFINE_PROP(HeldObject, TWeakObjectPtr<AActor>);
+    DEFINE_PROP(RepActiveMovementModeExtension, void*);
+    DEFINE_BITFIELD_PROP(bIsPlayingEmote);
+    DEFINE_PROP(HealthSet, UFortHealthSet*);
+    DEFINE_PROP(CurrentWeaponList, TArray<AActor*>);
 
     DEFINE_FUNC(BeginSkydiving, void);
     DEFINE_FUNC(GetHealth, float);
@@ -70,6 +103,8 @@ public:
     DEFINE_FUNC(OnRep_PlayerState, void);
     DEFINE_FUNC(ServerSetAttachment, void);
     DEFINE_FUNC(GetActiveZipline, AFortAscenderZipline*);
+    DEFINE_FUNC(ServerOnExitVehicle, void);
+    DEFINE_FUNC(SetInVortex, void);
 
     DefUHookOg(ServerHandlePickup_);
     DefUHookOg(ServerHandlePickupInfo);
@@ -78,6 +113,7 @@ public:
     DefUHookOg(OnCapsuleBeginOverlap_);
     static void MovingEmoteStopped(UObject*, FFrame&);
     DefUHookOg(Athena_MedConsumable_Triggered);
+    DefUHookOg(ServerOnExitVehicle_);
 
     InitPostLoadHooks;
 };

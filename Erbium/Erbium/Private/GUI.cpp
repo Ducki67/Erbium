@@ -6,6 +6,8 @@
 #include "../../ImGui/imgui_impl_dx11.h"
 #include "../Public/Configuration.h"
 #include "../Public/Events.h"
+#include "../../FortniteGame/Public/BattleRoyaleGamePhaseLogic.h"
+#include "../../FortniteGame/Public/BuildingSMActor.h"
 #pragma comment(lib, "d3d11.lib")
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -52,7 +54,7 @@ void GUI::Init()
 
     wchar_t buffer[67];
     swprintf_s(buffer, VersionInfo.EngineVersion >= 5.0 ? L"Erbium (FN %.2f, UE %.1f)" : (VersionInfo.FortniteVersion >= 5.00 || VersionInfo.FortniteVersion < 1.2 ? L"Erbium (FN %.2f, UE %.2f)" : L"Erbium (FN %.1f, UE %.2f)"), VersionInfo.FortniteVersion, VersionInfo.EngineVersion);
-    auto hWnd = CreateWindow(wc.lpszClassName, buffer, (WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX), 100, 100, (int)(WindowWidth * main_scale), (int)(WindowHeight * main_scale), nullptr, nullptr, nullptr, nullptr);
+    auto hWnd = CreateWindow(wc.lpszClassName, buffer, WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX & ~WS_THICKFRAME, 100, 100, (int)(WindowWidth * main_scale), (int)(WindowHeight * main_scale), nullptr, nullptr, nullptr, nullptr);
 
     IDXGISwapChain* g_pSwapChain = nullptr;
     ID3D11Device* g_pd3dDevice = nullptr;
@@ -200,6 +202,7 @@ void GUI::Init()
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
 
+        main_scale = ImGui_ImplWin32_GetDpiScaleForMonitor(MonitorFromPoint(POINT{ 0, 0 }, MONITOR_DEFAULTTOPRIMARY));
         ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
         ImGui::SetNextWindowSize(ImVec2(WindowWidth * main_scale, WindowHeight * main_scale), ImGuiCond_Always);
 
@@ -234,7 +237,7 @@ void GUI::Init()
                     SelectedUI = 1;
                     ImGui::EndTabItem();
                 }
-                
+
                 if (hasEvent == 2 && ImGui::BeginTabItem("Events"))
                 {
                     SelectedUI = 2;
@@ -255,19 +258,29 @@ void GUI::Init()
         switch (SelectedUI)
         {
         case 0:
-            ImGui::Text((std::string("Status: ") + (gsStatus == 0 ? "Setting up" : (gsStatus == 1 ? "Joinable" : "Match started"))).c_str());
-            
+            ImGui::Text((std::string("Status: ") + (gsStatus == 0 ? "Setting up the server..." : (gsStatus == 1 ? "Joinable!" : "Match Started."))).c_str());
+
             if (gsStatus <= 1)
                 ImGui::Checkbox("Lategame", &FConfiguration::bLateGame);
 
-            if (gsStatus == 1 && ImGui::Button("Start bus early"))
+            if (gsStatus == 1 && ImGui::Button("Start Bus Early"))
             {
                 gsStatus = 2;
+                sprintf_s(GUI::windowTitle, VersionInfo.EngineVersion >= 5.0 ? "Erbium (FN %.2f, UE %.1f): Match started" : (VersionInfo.FortniteVersion >= 5.00 || VersionInfo.FortniteVersion < 1.2 ? "Erbium (FN %.2f, UE %.2f): Match started" : "Erbium (FN %.1f, UE %.2f): Match started"), VersionInfo.FortniteVersion, VersionInfo.EngineVersion);
+                SetConsoleTitleA(GUI::windowTitle);
 
-                UKismetSystemLibrary::ExecuteConsoleCommand(UWorld::GetWorld(), FString(L"startaircraft"), nullptr);
+                if (UFortGameStateComponent_BattleRoyaleGamePhaseLogic::GetDefaultObj())
+                {
+                    UFortGameStateComponent_BattleRoyaleGamePhaseLogic::bStartAircraft = true;
+                    //auto GamePhaseLogic = UFortGameStateComponent_BattleRoyaleGamePhaseLogic::Get();
+
+                    //GamePhaseLogic->StartAircraftPhase();
+                }
+                else
+                    UKismetSystemLibrary::ExecuteConsoleCommand(UWorld::GetWorld(), FString(L"startaircraft"), nullptr);
             }
 
-            ImGui::InputText("Console command", commandBuffer, 1024);
+            ImGui::InputText("Console Command", commandBuffer, 1024);
 
             if (ImGui::Button("Execute"))
             {
@@ -278,29 +291,92 @@ void GUI::Init()
             }
             break;
         case 1:
-            if (ImGui::Button("Resume zone"))
-                UKismetSystemLibrary::ExecuteConsoleCommand(UWorld::GetWorld(), FString(L"startsafezone"), nullptr);
+            if (ImGui::Button("Pause Safe Zone"))
+            {
+                UFortGameStateComponent_BattleRoyaleGamePhaseLogic::bPausedZone = true;
+                auto GameMode = (AFortGameModeAthena*)UWorld::GetWorld()->AuthorityGameMode;
+                if (GameMode->HasbSafeZonePaused())
+                    GameMode->bSafeZonePaused = true;
+                //UKismetSystemLibrary::ExecuteConsoleCommand(UWorld::GetWorld(), FString(L"pausesafezone"), nullptr);
+            }
 
-            if (ImGui::Button("Pause zone"))
-                UKismetSystemLibrary::ExecuteConsoleCommand(UWorld::GetWorld(), FString(L"pausesafezone"), nullptr);
+            if (ImGui::Button("Resume Safe Zone"))
+            {
+                UFortGameStateComponent_BattleRoyaleGamePhaseLogic::bPausedZone = false;
+                auto GameMode = (AFortGameModeAthena*)UWorld::GetWorld()->AuthorityGameMode;
+                if (GameMode->HasbSafeZonePaused())
+                    GameMode->bSafeZonePaused = false;
+                //UKismetSystemLibrary::ExecuteConsoleCommand(UWorld::GetWorld(), FString(L"startsafezone"), nullptr);
+            }
 
-            if (ImGui::Button("Skip zone"))
-                UKismetSystemLibrary::ExecuteConsoleCommand(UWorld::GetWorld(), FString(L"skipsafezone"), nullptr);
+            if (ImGui::Button("Skip Safe Zone"))
+            {
+                auto GameMode = (AFortGameModeAthena*)UWorld::GetWorld()->AuthorityGameMode;
 
-            if (ImGui::Button("Start shrinking"))
-                UKismetSystemLibrary::ExecuteConsoleCommand(UWorld::GetWorld(), FString(L"startshrinksafezone"), nullptr);
+                if (GameMode->HasSafeZoneIndicator())
+                {
+                    if (GameMode->SafeZoneIndicator)
+                    {
+                        GameMode->SafeZoneIndicator->SafeZoneStartShrinkTime = (float)UGameplayStatics::GetTimeSeconds(UWorld::GetWorld());
+                        GameMode->SafeZoneIndicator->SafeZoneFinishShrinkTime = GameMode->SafeZoneIndicator->SafeZoneStartShrinkTime + 0.05f;
+                    }
+                }
+                else
+                {
+                    auto GamePhaseLogic = UFortGameStateComponent_BattleRoyaleGamePhaseLogic::Get(UWorld::GetWorld());
+
+                    if (GamePhaseLogic->SafeZoneIndicator)
+                    {
+                        GamePhaseLogic->SafeZoneIndicator->SafeZoneStartShrinkTime = (float)UGameplayStatics::GetTimeSeconds(UWorld::GetWorld());
+                        GamePhaseLogic->SafeZoneIndicator->SafeZoneFinishShrinkTime = GamePhaseLogic->SafeZoneIndicator->SafeZoneStartShrinkTime + 0.05f;
+                    }
+                }
+
+                // UKismetSystemLibrary::ExecuteConsoleCommand(UWorld::GetWorld(), FString(L"skipsafezone"), nullptr);
+            }
+
+            if (ImGui::Button("Start Shrinking Safe Zone"))
+            {
+                auto GameMode = (AFortGameModeAthena*)UWorld::GetWorld()->AuthorityGameMode;
+
+                if (GameMode->HasSafeZoneIndicator())
+                {
+                    if (GameMode->SafeZoneIndicator)
+                        GameMode->SafeZoneIndicator->SafeZoneStartShrinkTime = (float)UGameplayStatics::GetTimeSeconds(UWorld::GetWorld());
+                }
+                else
+                {
+                    auto GamePhaseLogic = UFortGameStateComponent_BattleRoyaleGamePhaseLogic::Get(UWorld::GetWorld());
+
+                    if (GamePhaseLogic->SafeZoneIndicator)
+                        GamePhaseLogic->SafeZoneIndicator->SafeZoneStartShrinkTime = (float)UGameplayStatics::GetTimeSeconds(UWorld::GetWorld());
+                }
+
+                // UKismetSystemLibrary::ExecuteConsoleCommand(UWorld::GetWorld(), FString(L"startshrinksafezone"), nullptr);
+            }
 
             break;
         case 2:
-            if (ImGui::Button("Start event"))
+            if (ImGui::Button("Start Event"))
                 Events::StartEvent();
 
             break;
         case 3:
-            ImGui::Checkbox("Infinite materials", &FConfiguration::bInfiniteMats);
-            ImGui::Checkbox("Infinite ammo", &FConfiguration::bInfiniteAmmo);
+            ImGui::Checkbox("Infinite Materials", &FConfiguration::bInfiniteMats);
+            ImGui::Checkbox("Infinite Ammo", &FConfiguration::bInfiniteAmmo);
 
-            ImGui::SliderInt("Siphon amount", &FConfiguration::SiphonAmount, 0, 200);
+            ImGui::SliderInt("Siphon Amount:", &FConfiguration::SiphonAmount, 0, 200);
+
+            if (ImGui::Button("Reset Builds"))
+            {
+                auto Builds = Utils::GetAll<ABuildingSMActor>();
+
+                for (auto& Build : Builds)
+                    if (Build->bPlayerPlaced)
+                        Build->K2_DestroyActor();
+
+                Builds.Free();
+            }
             break;
         }
 

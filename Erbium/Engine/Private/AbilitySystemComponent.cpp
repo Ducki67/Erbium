@@ -11,7 +11,7 @@ FGameplayAbilitySpecHandle UAbilitySystemComponent::GiveAbility(const UObject* A
         return {};
 
     auto Spec = (FGameplayAbilitySpec*) malloc(FGameplayAbilitySpec::Size());
-    __stosb(PBYTE(Spec), 0, FGameplayAbilitySpec::Size());
+    memset(PBYTE(Spec), 0, FGameplayAbilitySpec::Size());
 
     if (ConstructAbilitySpec)
         ((void (*)(FGameplayAbilitySpec*, const UObject*, int, int, UObject*)) ConstructAbilitySpec)(Spec, Ability, 1, -1, SourceObject);
@@ -24,7 +24,7 @@ FGameplayAbilitySpecHandle UAbilitySystemComponent::GiveAbility(const UObject* A
         Spec->Level = 1;
         Spec->InputID = -1;
         Spec->Handle.Handle = rand();
-        if (VersionInfo.FortniteVersion <= 23) Spec->SourceObject = SourceObject;
+        Spec->SourceObject = SourceObject;
     }
 
     FGameplayAbilitySpecHandle OutHandle;
@@ -67,7 +67,8 @@ struct _Pad_0x18
 uint64_t InternalTryActivateAbility_ = 0;
 void UAbilitySystemComponent::InternalServerTryActivateAbility(UAbilitySystemComponent* AbilitySystemComponent, FGameplayAbilitySpecHandle Handle, bool InputPressed, FPredictionKey* PredictionKey, void* TriggerEventData)
 {
-    auto Spec = AbilitySystemComponent->ActivatableAbilities.Items.Search([&](FGameplayAbilitySpec& item) {
+    auto Spec = AbilitySystemComponent->ActivatableAbilities.Items.Search([&](FGameplayAbilitySpec& item)
+    {
         return item.Handle.Handle == Handle.Handle;
         }, FGameplayAbilitySpec::Size());
 
@@ -87,6 +88,53 @@ void UAbilitySystemComponent::InternalServerTryActivateAbility(UAbilitySystemCom
         AbilitySystemComponent->ActivatableAbilities.MarkItemDirty(*Spec);
     }
 }
+
+
+void UFortGameplayAbility::K2_AddGameplayCueWithParams_(UObject* Context, FFrame& Stack)
+{
+    auto& GameplayCueTag = Stack.StepCompiledInRef<FGameplayTag>();
+    auto& GameplayCueParameter = Stack.StepCompiledInRef<FGameplayCueParameters>();
+    bool bRemoveOnAbilityEnd;
+
+    Stack.StepCompiledIn(&bRemoveOnAbilityEnd);
+    Stack.IncrementCode();
+
+    auto Ability = (UFortGameplayAbility*)Context;
+    callOG(Ability, Stack.GetCurrentNativeFunction(), K2_AddGameplayCueWithParams, GameplayCueTag, GameplayCueParameter, bRemoveOnAbilityEnd);
+
+    auto PredictionKey = (FPredictionKey*)malloc(FPredictionKey::Size());
+    memset((PBYTE)PredictionKey, 0, FPredictionKey::Size());
+
+    auto AbilitySystemComponent = (UAbilitySystemComponent*)Ability->GetAbilitySystemComponentFromActorInfo();
+
+    //AbilitySystemComponent->NetMulticast_InvokeGameplayCueAdded(GameplayCueTag, *PredictionKey, EffectContext);
+    if (AbilitySystemComponent)
+        AbilitySystemComponent->NetMulticast_InvokeGameplayCueAdded_WithParams(GameplayCueTag, *PredictionKey, GameplayCueParameter);
+
+    free(PredictionKey);
+}
+
+void UFortGameplayAbility::K2_ExecuteGameplayCue_(UObject* Context, FFrame& Stack)
+{
+    auto& GameplayCueTag = Stack.StepCompiledInRef<FGameplayTag>();
+    auto& EffectContext = Stack.StepCompiledInRef<FGameplayEffectContextHandle>();
+    Stack.IncrementCode();
+
+    auto Ability = (UFortGameplayAbility*)Context;
+    callOG(Ability, Stack.GetCurrentNativeFunction(), K2_ExecuteGameplayCue, GameplayCueTag, EffectContext);
+
+    auto PredictionKey = (FPredictionKey*)malloc(FPredictionKey::Size());
+    memset((PBYTE)PredictionKey, 0, FPredictionKey::Size());
+
+    auto AbilitySystemComponent = (UAbilitySystemComponent*)Ability->GetAbilitySystemComponentFromActorInfo();
+
+    //AbilitySystemComponent->NetMulticast_InvokeGameplayCueAdded(GameplayCueTag, *PredictionKey, EffectContext);
+    if (AbilitySystemComponent)
+        AbilitySystemComponent->NetMulticast_InvokeGameplayCueExecuted(GameplayCueTag, *PredictionKey, EffectContext);
+
+    free(PredictionKey);
+}
+
 
 void UAbilitySystemComponent::Hook()
 {
@@ -117,4 +165,7 @@ void UAbilitySystemComponent::Hook()
     }
 
     Utils::HookEvery<UAbilitySystemComponent>(istaIdx, InternalServerTryActivateAbility);
+
+    //Utils::ExecHook(UFortGameplayAbility::GetDefaultObj()->GetFunction("K2_ExecuteGameplayCue"), UFortGameplayAbility::K2_ExecuteGameplayCue_, UFortGameplayAbility::K2_ExecuteGameplayCue_OG);
+    //Utils::ExecHook(UFortGameplayAbility::GetDefaultObj()->GetFunction("K2_AddGameplayCueWithParams"), UFortGameplayAbility::K2_AddGameplayCueWithParams_, UFortGameplayAbility::K2_AddGameplayCueWithParams_OG);
 }

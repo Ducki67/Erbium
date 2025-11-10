@@ -2,6 +2,7 @@
 #include "../Public/FortKismetLibrary.h"
 #include "../Public/FortInventory.h"
 #include "../Public/FortLootPackage.h"
+#include "../Public/FortPlayerControllerAthena.h"
 
 bool bHasbPickupOnlyRelevantToOwner = false;
 bool bHasbToss = false;
@@ -60,6 +61,7 @@ bool bHasItemVariantGuid2 = false;
 bool bHasItemLevel = false;
 bool bHasPickupInstigatorHandle = false;
 bool bHasbUseItemPickupAnalyticEvent = false;
+bool bHasWeaponAmmoOverride = false;
 void UFortKismetLibrary::GiveItemToInventoryOwner(UObject* Object, FFrame& Stack)
 {
 	TScriptInterface<class IFortInventoryOwnerInterface> InventoryOwner;
@@ -70,6 +72,7 @@ void UFortKismetLibrary::GiveItemToInventoryOwner(UObject* Object, FFrame& Stack
 	int32 ItemLevel = -1;
 	int32 PickupInstigatorHandle = 0;
 	bool bUseItemPickupAnalyticEvent = false;
+	int32 WeaponAmmoOverride = -1;
 	Stack.StepCompiledIn(&InventoryOwner);
 	Stack.StepCompiledIn(&ItemDefinition);
 	if (bHasItemVariantGuid2)
@@ -82,10 +85,14 @@ void UFortKismetLibrary::GiveItemToInventoryOwner(UObject* Object, FFrame& Stack
 		Stack.StepCompiledIn(&PickupInstigatorHandle);
 	if (bHasbUseItemPickupAnalyticEvent)
 		Stack.StepCompiledIn(&bUseItemPickupAnalyticEvent);
+	if (bHasWeaponAmmoOverride)
+		Stack.StepCompiledIn(&WeaponAmmoOverride);
 	Stack.IncrementCode();
 
 	auto PlayerController = (AFortPlayerControllerAthena*)InventoryOwner.ObjectPointer;
 	auto ItemEntry = AFortInventory::MakeItemEntry(ItemDefinition, NumberToGive, ItemLevel);
+	if (WeaponAmmoOverride != -1)
+		ItemEntry->LoadedAmmo = WeaponAmmoOverride;
 	PlayerController->InternalPickup(ItemEntry);
 	free(ItemEntry);
 }
@@ -162,7 +169,8 @@ void UFortKismetLibrary::K2_RemoveItemFromPlayerByGuid(UObject* Context, FFrame&
 	auto RemoveCount = max(AmountToRemove, 0);
 	Item->ItemEntry.Count -= RemoveCount;
 
-	if (AmountToRemove < 0 || Item->ItemEntry.Count <= 0 || Item->ItemEntry.ItemDefinition->IsA(UFortGadgetItemDefinition::StaticClass())) {
+	if (AmountToRemove < 0 || Item->ItemEntry.Count <= 0 || Item->ItemEntry.ItemDefinition->IsA(UFortGadgetItemDefinition::StaticClass()))
+	{
 		RemoveCount += Item->ItemEntry.Count;
 		PlayerController->WorldInventory->Remove(Item->ItemEntry.ItemGuid);
 	}
@@ -216,6 +224,42 @@ void UFortKismetLibrary::PickLootDrops(UObject* Object, FFrame& Stack, bool* Ret
 	*Ret = LootDrops.Num() > 0;
 }
 
+
+void UFortKismetLibrary::K2_SpawnPickupInWorldWithClassAndItemEntry(UObject* Context, FFrame& Stack, AFortPickupAthena** Ret)
+{
+	UObject* WorldContextObject;
+	FFortItemEntry Entry;
+	TSubclassOf<AFortPickupAthena> PickupClass;
+	FVector Position;
+	FVector Direction;
+	int32 OverrideMaxStackCount;
+	bool bToss;
+	bool bRandomRotation;
+	bool bBlockedFromAutoPickup;
+	uint8_t SourceType;
+	uint8_t Source;
+	class AFortPlayerControllerAthena* OptionalOwnerPC;
+	bool bPickupOnlyRelevantToOwner;
+
+	Stack.StepCompiledIn(&WorldContextObject);
+	Stack.StepCompiledIn(&Entry);
+	Stack.StepCompiledIn(&PickupClass);
+	Stack.StepCompiledIn(&Position);
+	Stack.StepCompiledIn(&Direction);
+	Stack.StepCompiledIn(&OverrideMaxStackCount);
+	Stack.StepCompiledIn(&bToss);
+	Stack.StepCompiledIn(&bRandomRotation);
+	Stack.StepCompiledIn(&bBlockedFromAutoPickup);
+	Stack.StepCompiledIn(&SourceType);
+	Stack.StepCompiledIn(&Source);
+	Stack.StepCompiledIn(&OptionalOwnerPC);
+	Stack.StepCompiledIn(&bPickupOnlyRelevantToOwner);
+	Stack.IncrementCode();
+
+	*Ret = AFortInventory::SpawnPickup(Position, Entry.ItemDefinition, Entry.Count, Entry.Level, SourceType, Source, OptionalOwnerPC ? OptionalOwnerPC->MyFortPawn : nullptr, bToss, bRandomRotation, PickupClass.Get());
+}
+
+
 void UFortKismetLibrary::Hook()
 {
 	auto K2_SpawnPickupInWorldFn = GetDefaultObj()->GetFunction("K2_SpawnPickupInWorld");
@@ -249,15 +293,9 @@ void UFortKismetLibrary::Hook()
 		for (auto& Param : PickLootDropsFn->GetParamsNamed().NameOffsetMap)
 		{
 			if (Param.Name == "OptionalLootTags")
-			{
 				bHasOptionalLootTags = true;
-				break;
-			} 
 			else if (Param.Name == "WorldContextObject")
-			{
 				bHasWorldContextObject2 = true;
-				break;
-			}
 		}
 	Utils::ExecHook(PickLootDropsFn, PickLootDrops);
 }
@@ -276,6 +314,8 @@ void UFortKismetLibrary::PostLoadHook()
 				bHasPickupInstigatorHandle = true;
 			else if (Param.Name == "bUseItemPickupAnalyticEvent")
 				bHasbUseItemPickupAnalyticEvent = true;
+			else if (Param.Name == "WeaponAmmoOverride")
+				bHasWeaponAmmoOverride = true;
 		}
 	Utils::ExecHook(GiveItemToInventoryOwnerFn, GiveItemToInventoryOwner);
 

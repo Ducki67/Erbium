@@ -18,11 +18,13 @@ namespace SDK
 		int32 ArrayReplicationKey;
 		char GuidReferencesMap[0x50];
 
-		int32& GetCachedItems() {
+		int32& GetCachedItems()
+		{
 			return GetFromOffset<int32>(this, VersionInfo.FortniteVersion >= 8.30 ? 0xf8 : 0xa8);
 		}
 
-		int32& GetCachedItemsToConsiderForWriting() {
+		int32& GetCachedItemsToConsiderForWriting()
+		{
 			return GetFromOffset<int32>(this, VersionInfo.FortniteVersion >= 8.30 ? 0xfc : 0xac);
 		}
 
@@ -108,13 +110,13 @@ namespace SDK
 
 		FVector& operator=(FVector& Rhs)
 		{
-			__movsb((PBYTE)this, (const PBYTE)&Rhs, Size());
+			memcpy((PBYTE)this, (const PBYTE)&Rhs, Size());
 			return *this;
 		}
 
 		FVector& operator=(FVector&& Rhs)
 		{
-			__movsb((PBYTE)this, (const PBYTE)&Rhs, Size());
+			memcpy((PBYTE)this, (const PBYTE)&Rhs, Size());
 			return *this;
 		}
 
@@ -247,13 +249,13 @@ namespace SDK
 
 		FQuat& operator=(FQuat&& Rhs)
 		{
-			__movsb((PBYTE)this, (const PBYTE)&Rhs, Size());
+			memcpy((PBYTE)this, (const PBYTE)&Rhs, Size());
 			return *this;
 		}
 
 		FQuat& operator=(FQuat& Rhs)
 		{
-			__movsb((PBYTE)this, (const PBYTE)&Rhs, Size());
+			memcpy((PBYTE)this, (const PBYTE)&Rhs, Size());
 			return *this;
 		}
 
@@ -278,17 +280,18 @@ namespace SDK
 
 		FRotator& operator=(FRotator& Rhs)
 		{
-			__movsb((PBYTE)this, (const PBYTE)&Rhs, Size());
+			memcpy((PBYTE)this, (const PBYTE)&Rhs, Size());
 			return *this;
 		}
 
 		FRotator& operator=(FRotator&& Rhs)
 		{
-			__movsb((PBYTE)this, (const PBYTE)&Rhs, Size());
+			memcpy((PBYTE)this, (const PBYTE)&Rhs, Size());
 			return *this;
 		}
 
-		operator FQuat() {
+		operator FQuat()
+		{
 			double halfOfARadian = 0.008726646259971648;
 			double sinPitch = sin(Pitch * halfOfARadian),
 				sinYaw = sin(Yaw * halfOfARadian),
@@ -393,13 +396,13 @@ namespace SDK
 
 		FTransform& operator=(FTransform&& Rhs)
 		{
-			__movsb((PBYTE)this, (const PBYTE)&Rhs, Size());
+			memcpy((PBYTE)this, (const PBYTE)&Rhs, Size());
 			return *this;
 		}
 
 		FTransform& operator=(FTransform& Rhs)
 		{
-			__movsb((PBYTE)this, (const PBYTE)&Rhs, Size());
+			memcpy((PBYTE)this, (const PBYTE)&Rhs, Size());
 			return *this;
 		}
 
@@ -491,7 +494,8 @@ namespace SDK
 			class FName ReturnValue;
 		};
 
-		/*static FName Conv_StringToName(FString Str) {
+		/*static FName Conv_StringToName(FString Str)
+	{
 			KismetStringLibrary_Conv_StringToName Params{ Str };
 			Conv_StringToName(&Params);
 			return Params.ReturnValue;
@@ -526,10 +530,12 @@ namespace SDK
 		DEFINE_BITFIELD_PROP(bAlwaysRelevant);
 		DEFINE_BITFIELD_PROP(bCanBeDamaged);
 		DEFINE_BITFIELD_PROP(bNetUseOwnerRelevancy);
+		DEFINE_BITFIELD_PROP(bTearOff);
 
 		DEFINE_FUNC(AddComponentByClass, UActorComponent*);
 		DEFINE_FUNC(GetComponentByClass, UActorComponent*);
 		DEFINE_FUNC(SetNetDormancy, void);
+		DEFINE_FUNC(FlushNetDormancy, void);
 		DEFINE_FUNC(ForceNetUpdate, void);
 		DEFINE_FUNC(K2_GetActorLocation, FVector);
 		DEFINE_FUNC(K2_GetActorRotation, FRotator);
@@ -563,7 +569,7 @@ namespace SDK
 				GetTimeSeconds__Ptr = GetDefaultObj()->GetFunction("GetTimeSeconds");
 
 			static auto RetSize = 0;
-			
+
 			if (RetSize == 0)
 			{
 				auto Params = GetTimeSeconds__Ptr->GetParams();
@@ -618,7 +624,8 @@ namespace SDK
 		DEFINE_PROP(ConsoleClass, SDK::UClass*);
 		DEFINE_PROP(GameViewport, UGameViewportClient*);
 
-		static UEngine* GetEngine() {
+		static UEngine* GetEngine()
+		{
 			static UEngine* _storage = nullptr;
 			if (!_storage)
 				_storage = (UEngine*)TUObjectArray::FindFirstObject("FortEngine");
@@ -641,6 +648,15 @@ namespace SDK
 		UCLASS_COMMON_MEMBERS(AServerStreamingLevelsVisibility);
 	};
 
+	class ULevel : public UObject
+	{
+	public:
+		UCLASS_COMMON_MEMBERS(ULevel);
+
+		DEFINE_PROP(OwningWorld, UObject*);
+		DEFINE_BITFIELD_PROP(bIsVisible);
+	};
+
 	class UWorld : public UObject
 	{
 	public:
@@ -649,8 +665,9 @@ namespace SDK
 		DEFINE_PROP(OwningGameInstance, UGameInstance*);
 		DEFINE_PROP(AuthorityGameMode, AActor*);
 		DEFINE_PROP(GameState, AActor*);
-		DEFINE_PROP(PersistentLevel, UObject*);
+		DEFINE_PROP(PersistentLevel, ULevel*);
 		DEFINE_PROP(NetDriver, UObject*);
+		DEFINE_PROP(DemoNetDriver, UObject*);
 		DEFINE_PROP(LevelCollections, TArray<FLevelCollection>);
 		DEFINE_PROP(ServerStreamingLevelsVisibility, AServerStreamingLevelsVisibility*);
 
@@ -679,19 +696,26 @@ namespace SDK
 
 		static AActor* SpawnActor(const UClass* Class, FTransform Transform, AActor* Owner = nullptr)
 		{
-			/*GameplayStatics_BeginDeferredActorSpawnFromClass Params;
-			Params.WorldContextObject = GetFirstInstance();
+			/*static auto BeginDeferredActorSpawnFromClassFn = UGameplayStatics::GetDefaultObj()->GetFunction("BeginDeferredActorSpawnFromClass");
+			static auto FinishSpawningActorFn = UGameplayStatics::GetDefaultObj()->GetFunction("FinishSpawningActor");
+			GameplayStatics_BeginDeferredActorSpawnFromClass Params{};
+			Params.WorldContextObject = GetWorld();
 			Params.ActorClass = Class;
 			Params.SpawnTransform = Transform;
 			Params.CollisionHandlingOverride = 2; // AdjustIfPossibleButAlwaysSpawn
-			Params.Owner = Owner;*/
+			Params.Owner = Owner;
+			
+			UGameplayStatics::GetDefaultObj()->ProcessEvent(BeginDeferredActorSpawnFromClassFn, &Params);*/
 			auto Actor = UGameplayStatics::BeginDeferredActorSpawnFromClass(GetWorld(), Class, Transform, 2, Owner);
 
-			/*GameplayStatics_FinishSpawningActor Params2;
+			/*GameplayStatics_FinishSpawningActor Params2{};
 			Params2.Actor = Params.ReturnValue;
 			Params2.SpawnTransform = Transform;
-			UGameplayStatics::FinishSpawningActor(&Params2);*/
-			return /*Params2.ReturnValue*/ UGameplayStatics::FinishSpawningActor(Actor, Transform);
+			UGameplayStatics::GetDefaultObj()->ProcessEvent(FinishSpawningActorFn, &Params2);
+			return Params2.ReturnValue;*/
+			//UGameplayStatics::FinishSpawningActor(&Params2);
+			
+			return UGameplayStatics::FinishSpawningActor(Actor, Transform);
 		}
 
 		static AActor* SpawnActor(const UClass* Class, FVector Loc, FRotator Rot = {}, AActor* Owner = nullptr)
@@ -723,9 +747,25 @@ namespace SDK
 			return (T*)SpawnActor(T::StaticClass(), Transform, Owner);
 		}
 
+		template <typename T = AActor>
+		static T* SpawnActorUnfinished(const UClass* Class, FVector Loc, FRotator Rot = {}, AActor* Owner = nullptr)
+		{
+			FTransform Transform(Loc, Rot);
+
+			return (T*)UGameplayStatics::BeginDeferredActorSpawnFromClass(UWorld::GetWorld(), Class, Transform, 2, Owner);
+		}
+
+		template <typename T = AActor>
+		static T* FinishSpawnActor(AActor* Actor, FVector Loc, FRotator Rot)
+		{
+			FTransform Transform(Loc, Rot);
+
+			return (T*)UGameplayStatics::FinishSpawningActor(Actor, Transform);
+		};
+
 		static UWorld* GetWorld()
 		{
-			return (UWorld*)UEngine::GetEngine()->GetGameViewport()->GetWorld();
+			return (UWorld*)UEngine::GetEngine()->GameViewport->World;
 		}
 	};
 
@@ -790,9 +830,10 @@ namespace SDK
 		return UKismetTextLibrary::Conv_TextToString(*this).ToString();
 	}
 
-	class alignas(0x8) FOutputDevice
+	class FOutputDevice
 	{
 	public:
+		void** VTable;
 		bool bSuppressEventTag;
 		bool bAutoEmitLineTerminator;
 	};
@@ -800,7 +841,6 @@ namespace SDK
 	class FFrame : public FOutputDevice
 	{
 	public:
-		void** VTable;
 		UFunction* Node;
 		UObject* Object;
 		uint8* Code;
@@ -813,11 +853,10 @@ namespace SDK
 	public:
 		UFunction* GetCurrentNativeFunction()
 		{
-			UFunction* Func = *(UFunction**)(__int64(this) + (VersionInfo.FortniteVersion >= 20 ? 0x90 : 0x88));
-
-			return Func;
+			return *(UFunction**)(__int64(this) + Offsets::FFrame_CurrentNativeFunction);
 		}
-		void StepCompiledIn(void* const Result = nullptr)
+		
+		__forceinline void StepCompiledIn(void* const Result = nullptr)
 		{
 			if (Code)
 			{
@@ -825,19 +864,21 @@ namespace SDK
 			}
 			else
 			{
-				const UField* _Prop = *(const UField**)(__int64(this) + (VersionInfo.FortniteVersion >= 20 ? 0x88 : 0x80));
+				const UField* _Prop = *(const UField**)(__int64(this) + Offsets::FFrame_PropertyChainForCompiledIn);
 				if (_Prop)
 				{
-					*(const UField**)(__int64(this) + (VersionInfo.FortniteVersion >= 20 ? 0x88 : 0x80)) = VersionInfo.EngineVersion >= 4.25 ? _Prop->FField_GetNext() : _Prop->GetNext();
+					*(const UField**)(__int64(this) + Offsets::FFrame_PropertyChainForCompiledIn) = *(const UField**)(__int64(_Prop) + Offsets::FFrame_Next);
 					((void (*)(FFrame*, void* const, const UField*)) Offsets::StepExplicitProperty)(this, Result, _Prop);
 				}
 			}
 		}
 
 
-		void* StepCompiledInRefInternal(void* _Tm)
+		__forceinline void* StepCompiledInRefInternal(void* _Tm)
 		{
 			MostRecentPropertyAddress = nullptr;
+			if (VersionInfo.FortniteVersion >= 20)
+				*(void**)(__int64(this) + 0x40) = nullptr;
 
 			if (Code)
 			{
@@ -845,8 +886,8 @@ namespace SDK
 			}
 			else
 			{
-				const UField* _Prop = *(const UField**)(__int64(this) + (VersionInfo.FortniteVersion >= 20 ? 0x88 : 0x80));
-				*(const UField**)(__int64(this) + (VersionInfo.FortniteVersion >= 20 ? 0x88 : 0x80)) = VersionInfo.EngineVersion >= 4.25 ? _Prop->FField_GetNext() : _Prop->GetNext();
+				const UField* _Prop = *(const UField**)(__int64(this) + Offsets::FFrame_PropertyChainForCompiledIn);
+				*(const UField**)(__int64(this) + Offsets::FFrame_PropertyChainForCompiledIn) = *(const UField**)(__int64(_Prop) + Offsets::FFrame_Next);
 				((void (*)(FFrame*, void* const, const UField*)) Offsets::StepExplicitProperty)(this, _Tm, _Prop);
 			}
 
@@ -854,16 +895,15 @@ namespace SDK
 		}
 
 		template <typename T>
-		T& StepCompiledInRef()
+		__forceinline T& StepCompiledInRef()
 		{
 			T TempVal{};
 			return *(T*)StepCompiledInRefInternal(&TempVal);
 		}
 
-		void IncrementCode()
+		__forceinline void IncrementCode()
 		{
-			if (Code)
-				Code++;
+			Code += !!Code;
 		}
 	};
 
@@ -897,7 +937,7 @@ namespace SDK
 			for (int i = 0; i < InvocationList.Num(); i++)
 			{
 				auto& ScriptDelegate = InvocationList.Get(i, FScriptDelegate::Size());
-				
+
 				ScriptDelegate.Object->Call(ScriptDelegate.Object->GetFunction(ScriptDelegate.FunctionName), std::forward<Args>(args)...);
 			}
 		}

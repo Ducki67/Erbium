@@ -3,6 +3,7 @@
 #include "FortPlaylistAthena.h"
 #include "../../Engine/Public/CurveTable.h"
 #include "FortPlayerStateAthena.h"
+#include "LevelStreamingDynamic.h"
 
 struct FGameMemberInfo : public FFastArraySerializerItem
 {
@@ -61,21 +62,11 @@ public:
     DEFINE_STRUCT_PROP(MegaStormGridCellThickness, FScalableFloat);
 };
 
-class AFortAthenaMapInfo : public AActor
-{
-public:
-    UCLASS_COMMON_MEMBERS(AFortAthenaMapInfo);
-
-    DEFINE_PROP(LlamaClass, UClass*);
-    DEFINE_PROP(SupplyDropInfoList, TArray<UFortSupplyDropInfo*>);
-    DEFINE_PROP(VendingMachineRarityCount, FScalableFloat);
-    DEFINE_PROP(SafeZoneDefinition, FFortSafeZoneDefinition);
-};
-
 struct FAircraftFlightInfo
 {
 public:
     USCRIPTSTRUCT_COMMON_MEMBERS(FAircraftFlightInfo);
+    uint8_t Padding[0x50];
 
     DEFINE_STRUCT_PROP(FlightSpeed, float);
     DEFINE_STRUCT_PROP(FlightStartLocation, FVector);
@@ -99,12 +90,62 @@ public:
     DEFINE_PROP(TimeTillDropEnd, float);
     DEFINE_PROP(DefaultBusSkin, const UObject*);
     DEFINE_PROP(SpawnedCosmeticActor, const UObject*);
+    DEFINE_PROP(FlightElapsedTime, float);
+    DEFINE_PROP(DropStartTime, float);
+    DEFINE_PROP(DropEndTime, float);
+    DEFINE_PROP(ReplicatedFlightTimestamp, float);
+
+    DEFINE_STATIC_FUNC(SpawnAircraft, AFortAthenaAircraft*);
+};
+
+
+struct FBoxSphereBounds final
+{
+public:
+    struct FVector                                Origin;                                            // 0x0000(0x0018)(Edit, BlueprintVisible, ZeroConstructor, SaveGame, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+    struct FVector                                BoxExtent;                                         // 0x0018(0x0018)(Edit, BlueprintVisible, ZeroConstructor, SaveGame, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+    double                                        SphereRadius;                                      // 0x0030(0x0008)(Edit, BlueprintVisible, ZeroConstructor, SaveGame, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+};
+
+
+class AFortAthenaMapInfo : public AActor
+{
+public:
+    UCLASS_COMMON_MEMBERS(AFortAthenaMapInfo);
+
+    DEFINE_PROP(LlamaClass, UClass*);
+    DEFINE_PROP(SupplyDropInfoList, TArray<UFortSupplyDropInfo*>);
+    DEFINE_PROP(VendingMachineRarityCount, FScalableFloat);
+    DEFINE_PROP(SafeZoneDefinition, FFortSafeZoneDefinition);
+    DEFINE_PROP(AircraftClass, TSubclassOf<AFortAthenaAircraft>);
+    DEFINE_PROP(FlightInfos, TArray<FAircraftFlightInfo>);
+    DEFINE_PROP(CachedPlayableBoundsForClients, FBoxSphereBounds);
+
+    DEFINE_FUNC(GetMapCenter, FVector);
+};
+
+class AFortVolumeManager : public AActor
+{
+public:
+    UCLASS_COMMON_MEMBERS(AFortVolumeManager);
+
+    DEFINE_BITFIELD_PROP(bInSpawningStartup);
+};
+
+struct FPlaylistStreamedLevelData
+{
+public:
+    USCRIPTSTRUCT_COMMON_MEMBERS(FPlaylistStreamedLevelData);
+    ULevelStreamingDynamic* StreamingLevel;
+
+    DEFINE_STRUCT_PROP(bIsFinishedStreaming, bool);
 };
 
 class AFortGameStateAthena : public AActor
 {
 public:
     UCLASS_COMMON_MEMBERS(AFortGameStateAthena);
+    static inline std::unordered_map<int32, TSubclassOf<AActor>> BuildingClassMap;
 
     DEFINE_PROP(CurrentPlaylistInfo, FPlaylistPropertyArray);
     DEFINE_PROP(CurrentPlaylistId, int32);
@@ -131,6 +172,9 @@ public:
     DEFINE_PROP(CachedSafeZoneStartUp, uint8);
     DEFINE_PROP(DefaultBattleBus, const UObject*);
     DEFINE_PROP(SafeZoneIndicator, AActor*);
+    DEFINE_PROP(StructuralSupportSystem, UObject*);
+    DEFINE_PROP(bPlaylistDataIsLoaded, bool);
+    DEFINE_PROP(VolumeManager, AFortVolumeManager*);
 
     DEFINE_FUNC(OnRep_CurrentPlaylistInfo, void);
     DEFINE_FUNC(OnRep_CurrentPlaylistData, void);

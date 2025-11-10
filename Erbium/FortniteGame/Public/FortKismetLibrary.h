@@ -29,11 +29,18 @@ public:
 	DEFINE_STATIC_FUNC(EquipFortAbilitySet, void);
 	DEFINE_STATIC_FUNC(FindGroundLocationAt, FVector);
 	DEFINE_STATIC_FUNC(UnequipFortAbilitySet, void);
+	DEFINE_STATIC_FUNC(SetTimeOfDay, void);
     //DEFINE_STATIC_FUNC(K2_GetResourceItemDefinition, UFortItemDefinition*);
 
 	static const UFortItemDefinition* K2_GetResourceItemDefinition(EFortResourceType Type)
 	{
 		// exec func doesnt exist on rlly old builds
+		
+		static auto K2_GetResourceItemDefinition__Ptr = GetDefaultObj()->GetFunction("K2_GetResourceItemDefinition");
+
+		if (K2_GetResourceItemDefinition__Ptr)
+			return GetDefaultObj()->Call<UFortItemDefinition*>(K2_GetResourceItemDefinition__Ptr, Type);
+
 		static auto WoodItemData = FindObject<UFortItemDefinition>(L"/Game/Items/ResourcePickups/WoodItemData.WoodItemData");
 		static auto StoneItemData = FindObject<UFortItemDefinition>(L"/Game/Items/ResourcePickups/StoneItemData.StoneItemData");
 		static auto MetalItemData = FindObject<UFortItemDefinition>(L"/Game/Items/ResourcePickups/MetalItemData.MetalItemData");
@@ -54,6 +61,7 @@ public:
 	static void K2_RemoveItemFromPlayerByGuid(UObject*, FFrame&, int32*);
 	static void SpawnItemVariantPickupInWorld(UObject*, FFrame&, AFortPickupAthena**);
 	static void PickLootDrops(UObject*, FFrame&, bool*);
+	static void K2_SpawnPickupInWorldWithClassAndItemEntry(UObject*, FFrame&, AFortPickupAthena**);
 
 	InitHooks;
 	InitPostLoadHooks;

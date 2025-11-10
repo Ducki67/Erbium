@@ -10,7 +10,7 @@
 #include "../Public/Misc.h"
 #include "../Public/GUI.h"
 #include "../../Erbium/Plugins/CrashReporter/Public/CrashReporter.h"
-#include <FortniteGame/Public/FortPlayerControllerAthena.h>
+#include "../../FortniteGame/Public/FortPlayerControllerAthena.h"
 
 void Main()
 {
@@ -48,6 +48,23 @@ void Main()
     }
     if (VersionInfo.EngineVersion >= 5.1)
         UKismetSystemLibrary::ExecuteConsoleCommand(UWorld::GetWorld(), FString(L"net.AllowEncryption 0"), nullptr);
+    if (VersionInfo.EngineVersion >= 5.3 && FConfiguration::bEnableIris)
+    {
+        UKismetSystemLibrary::ExecuteConsoleCommand(UWorld::GetWorld(), FString(L"log LogIris None"), nullptr);
+        UKismetSystemLibrary::ExecuteConsoleCommand(UWorld::GetWorld(), FString(L"log LogIrisRpc None"), nullptr);
+        UKismetSystemLibrary::ExecuteConsoleCommand(UWorld::GetWorld(), FString(L"log LogIrisBridge None"), nullptr);
+        auto IrisBool = Memcury::Scanner::FindPattern("83 3D ? ? ? ? ? 0F 8E ? ? ? ? 49 8B B9").RelativeOffset(2, 1).Get();
+        *(uint32_t*)IrisBool = true;
+        //UKismetSystemLibrary::ExecuteConsoleCommand(UWorld::GetWorld(), FString(L"net.Iris.UseIrisReplication 1"), nullptr);
+    }
+    if (VersionInfo.EngineVersion >= 5.4)
+    {
+        // sprint fix
+        UKismetSystemLibrary::ExecuteConsoleCommand(UWorld::GetWorld(), FString(L"Fort.MME.TacticalSprint 0"), nullptr);
+        UKismetSystemLibrary::ExecuteConsoleCommand(UWorld::GetWorld(), FString(L"Fort.MME.Hurdle 0"), nullptr);
+        UKismetSystemLibrary::ExecuteConsoleCommand(UWorld::GetWorld(), FString(L"Fort.MME.Sliding 0"), nullptr);
+        UKismetSystemLibrary::ExecuteConsoleCommand(UWorld::GetWorld(), FString(L"Fort.MME.Clambering 0"), nullptr);
+    }
 
 #ifdef CLIENT
     Misc::InitClient();
@@ -57,6 +74,10 @@ void Main()
 
     sprintf_s(GUI::windowTitle, VersionInfo.EngineVersion >= 5.0 ? "Erbium (FN %.2f, UE %.1f): Setting up" : (VersionInfo.FortniteVersion >= 5.00 || VersionInfo.FortniteVersion < 1.2 ? "Erbium (FN %.2f, UE %.2f): Setting up" : "Erbium (FN %.1f, UE %.2f): Setting up"), VersionInfo.FortniteVersion, VersionInfo.EngineVersion);
     SetConsoleTitleA(GUI::windowTitle);
+
+
+    if constexpr (!FConfiguration::bGUI)
+        Sleep(2000);
 
     printf("Hooking & finding offsets... (this may take a while)\n");
 
@@ -97,9 +118,14 @@ void Main()
     UWorld::GetWorld()->OwningGameInstance->LocalPlayers.Remove(0);
     const wchar_t* terrainOpen = L"open Athena_Terrain";
 
-    if (VersionInfo.FortniteVersion >= 11.00 && FConfiguration::bCreative)
+    if (wcsstr(FConfiguration::Playlist, L"/MoleGame/Playlists/Playlist_MoleGame"))
+    {
+        UKismetSystemLibrary::ExecuteConsoleCommand(UWorld::GetWorld(), FString(L"Mole.WorstCasePlayerCount 1"), nullptr);
+        terrainOpen = L"open Mole_UnderBase_Parent";
+    } else if (VersionInfo.FortniteVersion >= 11.00 && wcsstr(FConfiguration::Playlist, L"/Game/Athena/Playlists/Creative/Playlist_PlaygroundV2.Playlist_PlaygroundV2"))
         terrainOpen = L"open Creative_NoApollo_Terrain";
     else
+    {
         if (VersionInfo.FortniteVersion >= 27.00)
         {
             if (VersionInfo.FortniteVersion >= 28.00)
@@ -111,6 +137,7 @@ void Main()
             terrainOpen = L"open Artemis_Terrain";
         else if (VersionInfo.FortniteVersion >= 11.00)
             terrainOpen = L"open Apollo_Terrain";
+    }
 
     UKismetSystemLibrary::ExecuteConsoleCommand(UWorld::GetWorld(), FString(terrainOpen), nullptr);
 

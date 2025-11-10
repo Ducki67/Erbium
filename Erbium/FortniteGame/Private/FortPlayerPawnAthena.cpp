@@ -3,6 +3,7 @@
 #include "../Public/FortInventory.h"
 #include "../Public/FortPlayerControllerAthena.h"
 #include "../Public/FortWeapon.h"
+#include "../Public/FortPhysicsPawn.h"
 
 struct _Pad_0xC
 {
@@ -62,10 +63,12 @@ void AFortPlayerPawnAthena::ServerHandlePickup_(UObject* Context, FFrame& Stack)
 		Pickup->PickupLocationData.bPlayPickupSound = bPlayPickupSound;
 	Pickup->PickupLocationData.PickupTarget = Pawn;
 	Pickup->PickupLocationData.StartDirection = InStartDirection;
+	Pickup->PickupLocationData.FlyTime /= Pawn->PickupSpeedMultiplier;
 	Pickup->OnRep_PickupLocationData();
 
 	Pickup->bPickedUp = true;
 	Pickup->OnRep_bPickedUp();
+
 
 	Pawn->IncomingPickups.Add(Pickup);
 }
@@ -115,17 +118,20 @@ void AFortPlayerPawnAthena::ServerHandlePickupInfo(UObject* Context, FFrame& Sta
 	Pickup->PickupLocationData.bPlayPickupSound = bPlayPickupSound;
 	Pickup->PickupLocationData.PickupGuid = Pickup->PrimaryPickupItemEntry.ItemGuid;
 	Pickup->PickupLocationData.PickupTarget = Pawn;
+	Pickup->PickupLocationData.FlyTime /= Pawn->PickupSpeedMultiplier;
 	//Pickup->PickupLocationData.StartDirection = Params.Direction.QuantizeNormal();
 	Pickup->OnRep_PickupLocationData();
 
 	Pickup->bPickedUp = true;
 	Pickup->OnRep_bPickedUp();
 
+
 	Pawn->IncomingPickups.Add(Pickup);
 }
 
 
-bool AFortPlayerPawnAthena::FinishedTargetSpline(void* _Pickup) {
+bool AFortPlayerPawnAthena::FinishedTargetSpline(void* _Pickup)
+{
 	auto Pickup = (AFortPickupAthena*)_Pickup;
 
 	auto Pawn = (AFortPlayerPawnAthena*)Pickup->PickupLocationData.PickupTarget;
@@ -166,7 +172,7 @@ void AFortPlayerPawnAthena::ServerSendZiplineState(UObject* Context, FFrame& Sta
 
 	auto Zipline = Pawn->GetActiveZipline();
 
-	__movsb((PBYTE) &Pawn->ZiplineState, (const PBYTE)&State, FZiplinePawnState::Size());
+	memcpy((PBYTE)&Pawn->ZiplineState, (const PBYTE)&State, FZiplinePawnState::Size());
 
 	((void (*)(AFortPlayerPawnAthena*)) OnRep_ZiplineState)(Pawn);
 
@@ -210,7 +216,7 @@ void AFortPlayerPawnAthena::OnCapsuleBeginOverlap_(UObject* Context, FFrame& Sta
 		return callOG(Pawn, Stack.GetCurrentNativeFunction(), OnCapsuleBeginOverlap, OverlappedComp, OtherActor, OtherComp, OtherBodyIndex, bFromSweep, SweepResult);
 
 	auto Pickup = OtherActor->Cast<AFortPickupAthena>();
-	if (!Pickup || !Pickup->PrimaryPickupItemEntry.ItemDefinition)
+	if (!Pickup || !Pickup->PrimaryPickupItemEntry.ItemDefinition || !((AFortPlayerControllerAthena*)Pawn->Controller)->WorldInventory)
 		return callOG(Pawn, Stack.GetCurrentNativeFunction(), OnCapsuleBeginOverlap, OverlappedComp, OtherActor, OtherComp, OtherBodyIndex, bFromSweep, SweepResult);
 
 	auto MaxStack = Pickup->PrimaryPickupItemEntry.ItemDefinition->GetMaxStackSize();
@@ -230,8 +236,11 @@ void AFortPlayerPawnAthena::OnCapsuleBeginOverlap_(UObject* Context, FFrame& Sta
 void AFortPlayerPawnAthena::MovingEmoteStopped(UObject* Context, FFrame& Stack)
 {
 	Stack.IncrementCode();
-
 	auto Pawn = (AFortPlayerPawnAthena*)Context;
+
+	if (Pawn->HasbIsPlayingEmote() && Pawn->bIsPlayingEmote)
+		return;
+
 	static auto HasbMovingEmote = Pawn->HasbMovingEmote();
 	if (HasbMovingEmote)
 		Pawn->bMovingEmote = false;
@@ -260,29 +269,102 @@ void AFortPlayerPawnAthena::Athena_MedConsumable_Triggered(UObject* Context, FFr
 {
 	UGA_Athena_MedConsumable_Parent_C* Consumable = (UGA_Athena_MedConsumable_Parent_C*)Context;
 
+	printf("Called yo\n");
 	if (!Consumable || (!Consumable->HealsShields && !Consumable->HealsHealth) || !Consumable->PlayerPawn)
 		return Athena_MedConsumable_TriggeredOG(Context, Stack);
 
 	auto PlayerState = (AFortPlayerStateAthena*)Consumable->PlayerPawn->PlayerState;
-	static auto ShieldCue = UKismetStringLibrary::Conv_StringToName(FString(L"GameplayCue.Shield.PotionConsumed"));
-	static auto HealthCue = UKismetStringLibrary::Conv_StringToName(FString(L"GameplayCue.Athena.Health.HealUsed"));
+	static auto ShieldCue = FName(L"GameplayCue.Shield.PotionConsumed");
+	static auto HealthCue = FName(L"GameplayCue.Athena.Health.HealUsed");
 
 	auto Handle = PlayerState->AbilitySystemComponent->MakeEffectContext();
 	FGameplayTag Tag{};
 	FName CueName = Consumable->HealsShields ? ShieldCue : HealthCue;
 
 	if (Consumable->HealsHealth && Consumable->HealsShields)
-		if (Consumable->PlayerPawn->GetHealth() + Consumable->HealthHealAmount <= 100) 
+	{
+		static auto HealthHealAmountOffset = Consumable->GetOffset("HealthHealAmount");
+		auto HealthHealAmount = Consumable->HasHealthHealAmount() ? *(float*)(__int64(Consumable) + HealthHealAmountOffset) : *(double*)(__int64(Consumable) + HealthHealAmountOffset);
+		if (Consumable->PlayerPawn->GetHealth() + HealthHealAmount <= 100)
 			CueName = HealthCue;
+	}
 	Tag.TagName = CueName;
 
 	auto PredictionKey = (FPredictionKey*)malloc(FPredictionKey::Size());
-	__stosb((PBYTE)PredictionKey, 0, FPredictionKey::Size());
+	memset((PBYTE)PredictionKey, 0, FPredictionKey::Size());
 
 	PlayerState->AbilitySystemComponent->NetMulticast_InvokeGameplayCueAdded(Tag, *PredictionKey, Handle);
 	PlayerState->AbilitySystemComponent->NetMulticast_InvokeGameplayCueExecuted(Tag, *PredictionKey, Handle);
 
 	return Athena_MedConsumable_TriggeredOG(Context, Stack);
+}
+
+void AFortPlayerPawnAthena::ServerOnExitVehicle_(UObject* Context, FFrame& Stack)
+{
+	uint8_t ExitForceBehavior;
+	bool bDestroyVehicleWhenForced;
+
+	Stack.StepCompiledIn(&ExitForceBehavior);
+	Stack.StepCompiledIn(&bDestroyVehicleWhenForced);
+	Stack.IncrementCode();
+
+	auto Pawn = (AFortPlayerPawnAthena*)Context;
+	auto PlayerController = (AFortPlayerControllerAthena*)Pawn->Controller;
+	static auto GetVehicleFunc = Pawn->GetFunction("GetVehicle");
+	if (!GetVehicleFunc)
+		GetVehicleFunc = Pawn->GetFunction("BP_GetVehicle");
+
+	auto Vehicle = Pawn->Call<AFortAthenaVehicle*>(GetVehicleFunc);
+
+	auto SeatIdx = Vehicle->FindSeatIndex(PlayerController->MyFortPawn);
+
+	UFortVehicleSeatWeaponComponent* SeatWeaponComponent = (UFortVehicleSeatWeaponComponent*)Vehicle->GetComponentByClass(UFortVehicleSeatWeaponComponent::StaticClass());
+
+	if (SeatWeaponComponent)
+	{
+		UFortWeaponItemDefinition* Weapon = nullptr;
+		for (int i = 0; i < SeatWeaponComponent->WeaponSeatDefinitions.Num(); i++)
+		{
+			auto& WeaponDefinition = SeatWeaponComponent->WeaponSeatDefinitions.Get(i, FWeaponSeatDefinition::Size());
+
+			if (WeaponDefinition.SeatIndex != SeatIdx)
+				continue;
+
+			Weapon = WeaponDefinition.VehicleWeapon;
+			break;
+		}
+
+
+		auto ItemEntry = PlayerController->WorldInventory->Inventory.ReplicatedEntries.Search([Weapon](FFortItemEntry& entry)
+			{ return entry.ItemDefinition == Weapon; }, FFortItemEntry::Size());
+
+		if (ItemEntry)
+		{
+			printf("3");
+			PlayerController->WorldInventory->Remove(ItemEntry->ItemGuid);
+
+			auto LastItem = Pawn->HasPreviousWeapon() ? (AFortWeapon*)Pawn->PreviousWeapon : nullptr;
+			if (LastItem)
+			{
+				PlayerController->ServerExecuteInventoryItem(LastItem->ItemEntryGuid);
+				PlayerController->ClientEquipItem(LastItem->ItemEntryGuid, true);
+			}
+			else
+			{
+				auto pickaxeEntry = PlayerController->WorldInventory->Inventory.ReplicatedEntries.Search([Weapon](FFortItemEntry& entry)
+					{ return entry.ItemDefinition->IsA<UFortWeaponMeleeItemDefinition>(); }, FFortItemEntry::Size());
+
+				if (pickaxeEntry)
+				{
+					PlayerController->ServerExecuteInventoryItem(pickaxeEntry->ItemGuid);
+					PlayerController->ClientEquipItem(pickaxeEntry->ItemGuid, true);
+				}
+			}
+		}
+		printf("3");
+	}
+
+	return callOG(Pawn, Stack.GetCurrentNativeFunction(), ServerOnExitVehicle, ExitForceBehavior, bDestroyVehicleWhenForced);
 }
 
 void AFortPlayerPawnAthena::PostLoadHook()
@@ -297,13 +379,13 @@ void AFortPlayerPawnAthena::PostLoadHook()
 	{
 		Utils::ExecHook(GetDefaultObj()->GetFunction("ServerHandlePickup"), ServerHandlePickup_);
 	}
-	
+
 	Utils::Hook(FindFinishedTargetSpline(), FinishedTargetSpline, FinishedTargetSplineOG);
 	Utils::ExecHook(GetDefaultObj()->GetFunction("OnCapsuleBeginOverlap"), OnCapsuleBeginOverlap_, OnCapsuleBeginOverlap_OG);
 
 	Utils::ExecHook(GetDefaultObj()->GetFunction("ServerSendZiplineState"), ServerSendZiplineState);
 	Utils::ExecHook(GetDefaultObj()->GetFunction("MovingEmoteStopped"), MovingEmoteStopped);
 
-	if (VersionInfo.EngineVersion >= 4.24 && VersionInfo.EngineVersion < 4.27)
-		Utils::ExecHook((UFunction*)FindObject<UFunction>(L"/Game/Athena/Items/Consumables/Parents/GA_Athena_MedConsumable_Parent.GA_Athena_MedConsumable_Parent_C.Triggered_4C02BFB04B18D9E79F84848FFE6D2C32"), Athena_MedConsumable_Triggered, Athena_MedConsumable_TriggeredOG);
+	// uncomment ltr
+	//Utils::ExecHook(GetDefaultObj()->GetFunction("ServerOnExitVehicle"), ServerOnExitVehicle_, ServerOnExitVehicle_OG);
 }

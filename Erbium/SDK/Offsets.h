@@ -30,6 +30,7 @@ namespace SDK
 		inline uint64_t GetInterfaceAddress = 0;
 		inline uint64_t StaticFindObject = 0;
 		inline uint64_t StaticLoadObject = 0;
+		inline uint64_t FNameConstructor = 0;
 
 		inline uint32_t Offset_Internal = 0;
 		inline uint32_t ElementSize = 0;
@@ -41,7 +42,12 @@ namespace SDK
 		inline uint32_t FField_Next = 0;
 		inline uint32_t FField_Name = 0;
 		inline uint32_t ExecFunction = 0;
+		inline uint32_t FFrame_PropertyChainForCompiledIn = 0;
+		inline uint32_t FFrame_CurrentNativeFunction = 0;
+		inline uint32_t FFrame_Next = 0;
 	}
+
+	extern void UpdateNumElemsPerChunk();
 
 	inline void Init()
 	{
@@ -173,7 +179,10 @@ namespace SDK
 			addr = Memcury::Scanner::FindStringRef(L"AccessNoneNoContext").ScanFor({ 0x40, 0x55 }, true, 0, 1, 2000).Get();
 		else if (floor(VersionInfo.FortniteVersion) == 27)
 			addr = Memcury::Scanner::FindPattern("40 55 56 57 41 54 41 55 41 56 41 57 48 81 EC ? ? ? ? 48 8D 6C 24 ? 48 89 9D ? ? ? ? 48 8B 05 ? ? ? ? 48 33 C5 48 89 85 ? ? ? ? 45 33 E4 4C 89 45 ? 4D 8B F8").Get();
-		else if (VersionInfo.FortniteVersion >= 23.00) {
+		else if (VersionInfo.EngineVersion == 5.2)
+			addr = Memcury::Scanner::FindPattern("40 55 56 57 41 54 41 55 41 56 41 57 48 81 EC ? ? ? ? 48 8D 6C 24 ? 48 89 9D ? ? ? ? 48 8B 05 ? ? ? ? 48 33 C5 48 89 85 ? ? ? ? 45 33 F6").Get();
+		else if (VersionInfo.FortniteVersion >= 23.00)
+		{
 			addr = Memcury::Scanner::FindPattern("48 85 C9 0F 85 ? ? ? ? F7 87 ? ? ? ? ? ? ? ? ? 8B ?").ScanFor({ 0x40, 0x55 }, false).Get();
 			if (!addr)
 				addr = Memcury::Scanner::FindPattern("41 FF 92 ? ? ? ? E9 ? ? ? ? 49 8B C8").ScanFor({ 0x40, 0x55 }, false).Get();
@@ -184,7 +193,12 @@ namespace SDK
 		Offsets::ProcessEvent = addr;
 
 		if (VersionInfo.EngineVersion >= 4.21)
+		{
+			if (VersionInfo.FortniteVersion <= 6.01)
+				UpdateNumElemsPerChunk();
+
 			Offsets::GObjectsChunked = Memcury::Scanner::FindPattern(VersionInfo.FortniteVersion <= 6.02 ? "48 8B 05 ? ? ? ? 48 8B 0C C8 48 8D 04 D1" : "48 8B 05 ? ? ? ? 48 8B 0C C8 48 8B 04 D1").RelativeOffset(3).Get();
+		}
 		else
 		{
 			auto Addr = Memcury::Scanner::FindPattern("48 8B 05 ? ? ? ? 48 8D 14 C8 EB 03 49 8B D6 8B 42 08 C1 E8 1D A8 01 0F 85 ? ? ? ? F7 86 ? ? ? ? ? ? ? ?", false);
@@ -198,7 +212,11 @@ namespace SDK
 		if (!Offsets::Step)
 			Offsets::Step = Memcury::Scanner::FindPattern("48 8B 41 ? 4C 8B DA 44 0F B6 08").Get();
 
-		if (VersionInfo.FortniteVersion >= 20.00)
+		if (VersionInfo.EngineVersion >= 5.4 || VersionInfo.EngineVersion == 5.2)
+			Offsets::StepExplicitProperty = Memcury::Scanner::FindPattern("41 8B 40 ? 4D 8B C8 48 0F BA E0").Get();
+		else if (VersionInfo.EngineVersion == 5.3)
+			Offsets::StepExplicitProperty = Memcury::Scanner::FindPattern("48 8B C4 48 89 58 ? 48 89 68 ? 48 89 70 ? 48 89 78 ? 41 54 41 56 41 57 48 83 EC ? 41 8B 40 ? 49 8B D8 48 8B F2").Get();
+		else if (VersionInfo.FortniteVersion >= 20.00)
 			Offsets::StepExplicitProperty = Memcury::Scanner::FindPattern("48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC ? 41 8B 40 ? 49 8B D8 48 8B F2").Get();
 		else
 			Offsets::StepExplicitProperty = Memcury::Scanner::FindPattern("41 8B 40 ? 4D 8B C8").Get();
@@ -218,14 +236,18 @@ namespace SDK
 					Offsets::GetInterfaceAddress = Memcury::Scanner::FindPattern("48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC ? 33 DB 48 8B FA 48 8B F1 48 85 D2 0F 84 ? ? ? ? F7 82").Get();
 
 					if (!Offsets::GetInterfaceAddress)
+						Offsets::GetInterfaceAddress = Memcury::Scanner::FindPattern("4C 8B DC 49 89 5B ? 49 89 73 ? 57 48 83 EC ? 33 DB 48 8B FA 48 8B F1").Get();
+
+					if (!Offsets::GetInterfaceAddress)
 						Offsets::GetInterfaceAddress = Memcury::Scanner::FindPattern("48 89 5C 24 ? 48 89 74 24 ? 57 48 81 EC ? ? ? ? 33 DB 48 8B FA").Get();
 				}
 			}
 		}
 
-
-		if (VersionInfo.EngineVersion >= 5.2)
+		if (VersionInfo.EngineVersion >= 5.3)
 			Offsets::StaticFindObject = Memcury::Scanner::FindPattern("48 89 74 24 ? 48 89 7C 24 ? 55 41 54 41 55 41 56 41 57 48 8B EC 48 83 EC ? 4C 8B E9 48 8D 4D").Get();
+		else if (VersionInfo.EngineVersion == 5.2)
+			Offsets::StaticFindObject = Memcury::Scanner::FindPattern("48 89 5C 24 ? 48 89 74 24 ? 48 89 7C 24 ? 55 41 56 41 57 48 8B EC 48 83 EC ? 33 DB 4C 8B F9").Get();
 		else if (VersionInfo.EngineVersion >= 5.1)
 		{
 			Offsets::StaticFindObject = Memcury::Scanner::FindPattern("40 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ? ? ? ? 48 81 EC ? ? ? ? 48 8B 05 ? ? ? ? 48 33 C4 48 89 85 ? ? ? ? 33 F6 4C 8B E1 48 83 CB", false).Get();
@@ -279,7 +301,7 @@ namespace SDK
 			{
 				auto Ptr = (uint8_t*)(sRef - i);
 
-				if (*Ptr == 0x48 && *(Ptr + 1) == 0x89 && *(Ptr + 2) == 0x5c)
+				if (*Ptr == 0x48 && *(Ptr + 1) == 0x89 && *(Ptr + 2) == 0x5C)
 				{
 					Offsets::StaticFindObject = uint64_t(Ptr);
 					break;
@@ -287,26 +309,40 @@ namespace SDK
 			}
 		}
 
-		auto sRef = Memcury::Scanner::FindStringRef(L"STAT_LoadObject", false).Get();
-
-		if (!sRef)
+		if (VersionInfo.EngineVersion >= 5.4)
 		{
-			auto sRef2 = Memcury::Scanner::FindStringRef(L"Calling StaticLoadObject during PostLoad may result in hitches during streaming.");
-			Offsets::StaticLoadObject = sRef2.ScanFor({ 0x40, 0x55 }, false).Get();
+			Offsets::StaticLoadObject = Memcury::Scanner::FindPattern("40 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ? ? ? ? 48 81 EC ? ? ? ? 48 8B 05 ? ? ? ? 48 33 C4 48 89 85 ? ? ? ? 8B 85 ? ? ? ? 33 FF 8B 35").Get();
+
+			if (!Offsets::StaticLoadObject)
+				Offsets::StaticLoadObject = Memcury::Scanner::FindPattern("40 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ? ? ? ? B8 ? ? ? ? E8 ? ? ? ? 48 2B E0 48 8B 05 ? ? ? ? 48 33 C4 48 89 85 ? ? ? ? 8B 85").Get();
 		}
 		else
 		{
-			for (int i = 0; i < 400; i++)
+			auto sRef = Memcury::Scanner::FindStringRef(L"STAT_LoadObject", false).Get();
+
+			if (!sRef)
 			{
-				if (*(uint8_t*)(sRef - i) == 0x4C && *(uint8_t*)(sRef - i + 1) == 0x89 && *(uint8_t*)(sRef - i + 2) == 0x4C)
+				auto sRef2 = Memcury::Scanner::FindStringRef(L"Calling StaticLoadObject during PostLoad may result in hitches during streaming.");
+
+				if (!sRef2.Get())
+					sRef2 = Memcury::Scanner::FindStringRef(L"Calling StaticLoadObject(\"%s\", \"%s\", \"%s\") during PostLoad of %s is illegal and will crash in a cooked runtime", 0, false, VersionInfo.FortniteVersion >= 19);
+
+				Offsets::StaticLoadObject = sRef2.ScanFor({ 0x40, 0x55 }, false).Get();
+			}
+			else
+			{
+				for (int i = 0; i < 400; i++)
 				{
-					Offsets::StaticLoadObject = sRef - i;
-					break;
-				}
-				else if (*(uint8_t*)(sRef - i) == 0x48 && *(uint8_t*)(sRef - i + 1) == 0x8B && *(uint8_t*)(sRef - i + 2) == 0xC4)
-				{
-					Offsets::StaticLoadObject = sRef - i;
-					break;
+					if (*(uint8_t*)(sRef - i) == 0x4C && *(uint8_t*)(sRef - i + 1) == 0x89 && *(uint8_t*)(sRef - i + 2) == 0x4C)
+					{
+						Offsets::StaticLoadObject = sRef - i;
+						break;
+					}
+					else if (*(uint8_t*)(sRef - i) == 0x48 && *(uint8_t*)(sRef - i + 1) == 0x8B && *(uint8_t*)(sRef - i + 2) == 0xC4)
+					{
+						Offsets::StaticLoadObject = sRef - i;
+						break;
+					}
 				}
 			}
 		}
@@ -316,10 +352,13 @@ namespace SDK
 		Offsets::ElementSize = Offsets::Offset_Internal - 0x10;
 		Offsets::PropertiesSize = VersionInfo.EngineVersion >= 4.25 ? 0x58 : (VersionInfo.EngineVersion >= 4.22 ? 0x50 : 0x40);
 		Offsets::Super = VersionInfo.EngineVersion >= 4.22 ? 0x40 : 0x30;
-		Offsets::FieldMask = VersionInfo.EngineVersion >= 4.25 && VersionInfo.FortniteVersion < 20 ? 0x7b : 0x73;
+		Offsets::FieldMask = VersionInfo.EngineVersion >= 5.2 ? 0x6b : (VersionInfo.EngineVersion >= 4.25 && VersionInfo.FortniteVersion < 20 ? 0x7b : 0x73);
 		Offsets::Children = VersionInfo.EngineVersion >= 4.22 ? 0x48 : 0x38;
 		Offsets::FField_Next = VersionInfo.EngineVersion >= 5.2 ? 0x18 : 0x20;
 		Offsets::FField_Name = VersionInfo.EngineVersion >= 5.2 ? 0x20 : 0x28;
+		Offsets::FFrame_PropertyChainForCompiledIn = VersionInfo.FortniteVersion >= 20 ? 0x88 : 0x80;
+		Offsets::FFrame_CurrentNativeFunction = VersionInfo.FortniteVersion >= 20 ? 0x90 : 0x88;
+		Offsets::FFrame_Next = VersionInfo.EngineVersion >= 5.2 ? 0x18 : (VersionInfo.EngineVersion >= 4.25 ? 0x20 : 0x28);
 
 		if (VersionInfo.FortniteVersion <= 6.31)
 			Offsets::ExecFunction = 0xB0;
@@ -331,5 +370,22 @@ namespace SDK
 			Offsets::ExecFunction = 0xF0;
 		else
 			Offsets::ExecFunction = 0xD8;
+
+
+		auto StringRef = Memcury::Scanner::FindStringRef(L"ClientIgnoreLookInput", true).Get();
+
+		if (StringRef)
+		{
+			for (int i = 0; i < 1000; i++)
+			{
+				auto Ptr = (uint8_t*)(StringRef + i);
+
+				if (*Ptr == 0x48 && *(Ptr + 1) == 0x8D && (*(Ptr + 7) == 0xE9 || *(Ptr + 7) == 0xE8))
+				{
+					Offsets::FNameConstructor = Memcury::Scanner(Ptr + 7).RelativeOffset(1).Get();
+					break;
+				}
+			}
+		}
 	}
 }

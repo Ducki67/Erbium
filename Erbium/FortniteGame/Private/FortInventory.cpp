@@ -4,7 +4,7 @@
 #include "../Public/FortPlayerControllerAthena.h"
 #include "../Public/FortKismetLibrary.h"
 #include "../../Erbium/Public/Configuration.h"
-#include <objbase.h>
+#include "../Public/FortWeapon.h"
 
 uint32_t OnItemInstanceAddedVft;
 
@@ -17,8 +17,8 @@ UFortWorldItem* AFortInventory::GiveItem(const UFortItemDefinition* Def, int Cou
     Item->ItemEntry.LoadedAmmo = LoadedAmmo;
     if (Item->ItemEntry.HasPhantomReserveAmmo())
         Item->ItemEntry.PhantomReserveAmmo = PhantomReserveAmmo;
-    if (Item->ItemEntry.HasStateValues()) // dk
-        Item->ItemEntry.StateValues = StateValues;
+    //if (Item->ItemEntry.HasStateValues()) // dk
+    //    Item->ItemEntry.StateValues = StateValues;
 
     /*if (Item->ItemEntry.ItemGuid.A == 0 && Item->ItemEntry.ItemGuid.B == 0 && Item->ItemEntry.ItemGuid.C == 0 && Item->ItemEntry.ItemGuid.D == 0)
     {
@@ -78,6 +78,7 @@ void AFortInventory::SetRequiresUpdate()
     Inventory.MarkArrayDirty();
     bRequiresLocalUpdate = true;
     bRequiresSaving = true;
+    HandleInventoryLocalUpdate();
 
     ForceNetUpdate();
 }
@@ -89,6 +90,7 @@ void AFortInventory::Update(FFortItemEntry* Entry)
 
     if (Entry->bIsReplicatedCopy)
     {
+        Entry->bIsDirty = false;
         Inventory.MarkItemDirty(*Entry);
         SetRequiresUpdate();
         goto _out;
@@ -110,7 +112,7 @@ void AFortInventory::Update(FFortItemEntry* Entry)
             break;
         }
     }
-    _out:
+_out:
     Entry->bIsDirty = true;
     /*bRequiresLocalUpdate = true;
     HandleInventoryLocalUpdate();
@@ -118,13 +120,75 @@ void AFortInventory::Update(FFortItemEntry* Entry)
     return Entry ? Inventory.MarkItemDirty(*Entry) : Inventory.MarkArrayDirty();*/
 }
 
+uint64_t ClearAbility_;
+void AFortInventory::RemoveWeaponAbilities(AActor* Weapon__Uncasted)
+{
+    auto Weapon = (AFortWeapon*)Weapon__Uncasted;
+    auto ClearAbility = (void(*)(UAbilitySystemComponent*, FGameplayAbilitySpecHandle&)) ClearAbility_;
+    auto PlayerController = (AFortPlayerControllerAthena*)((AFortPlayerPawnAthena*)Weapon->Instigator)->Controller;
+    if (!PlayerController)
+        return;
+    auto AbilitySystemComponent = PlayerController->PlayerState->AbilitySystemComponent;
+
+    if (Weapon->PrimaryAbilitySpecHandle.Handle != -1)
+    {
+        ClearAbility(AbilitySystemComponent, Weapon->PrimaryAbilitySpecHandle);
+        Weapon->PrimaryAbilitySpecHandle.Handle = -1;
+    }
+    if (Weapon->SecondaryAbilitySpecHandle.Handle != -1)
+    {
+        ClearAbility(AbilitySystemComponent, Weapon->SecondaryAbilitySpecHandle);
+        Weapon->SecondaryAbilitySpecHandle.Handle = -1;
+    }
+    if (Weapon->ReloadAbilitySpecHandle.Handle != -1)
+    {
+        ClearAbility(AbilitySystemComponent, Weapon->ReloadAbilitySpecHandle);
+        Weapon->ReloadAbilitySpecHandle.Handle = -1;
+    }
+    if (Weapon->ImpactAbilitySpecHandle.Handle != -1)
+    {
+        ClearAbility(AbilitySystemComponent, Weapon->ImpactAbilitySpecHandle);
+        Weapon->ImpactAbilitySpecHandle.Handle = -1;
+    }
+    if (Weapon->EquippedAbilityHandles.Num())
+    {
+        for (int i = 0; i < Weapon->EquippedAbilityHandles.Num(); i++)
+        {
+            auto& Handle = Weapon->EquippedAbilityHandles.Get(i, FGameplayAbilitySpecHandle::Size());
+
+            if (IsBadReadPtr(&Handle)) // what
+                continue;
+
+            if (Handle.Handle != -1)
+            {
+                ClearAbility(AbilitySystemComponent, Handle);
+            }
+        }
+        Weapon->EquippedAbilityHandles.ResetNum();
+    }
+    if (Weapon->EquippedAbilitySetHandles.Num())
+    {
+        for (int i = 0; i < Weapon->EquippedAbilitySetHandles.Num(); i++)
+        {
+            auto& Handle = Weapon->EquippedAbilitySetHandles.Get(i, FFortAbilitySetHandle::Size());
+
+            UFortKismetLibrary::UnequipFortAbilitySet(Handle);
+        }
+
+        PlayerController->AppliedInGameModifierAbilitySetHandles.Reset();
+        Weapon->EquippedAbilitySetHandles.ResetNum();
+    }
+}
 
 void AFortInventory::Remove(FGuid Guid)
 {
-    auto ItemEntryIdx = Inventory.ReplicatedEntries.SearchIndex([&](FFortItemEntry& entry) { return entry.ItemGuid == Guid; }, FFortItemEntry::Size());
+    auto ItemEntryIdx = Inventory.ReplicatedEntries.SearchIndex([&](FFortItemEntry& entry)
+        { return entry.ItemGuid == Guid; }, FFortItemEntry::Size());
     auto& ItemEntry = Inventory.ReplicatedEntries.Get(ItemEntryIdx, FFortItemEntry::Size());
+    auto EntryDef = ItemEntry.ItemDefinition;
 
-    auto ItemInstanceIdx = Inventory.ItemInstances.SearchIndex([&](UFortWorldItem* entry) { return entry->ItemEntry.ItemGuid == Guid; });
+    auto ItemInstanceIdx = Inventory.ItemInstances.SearchIndex([&](UFortWorldItem* entry)
+        { return entry->ItemEntry.ItemGuid == Guid; });
     auto ItemInstance = Inventory.ItemInstances.Search([&](UFortWorldItem* entry)
         { return entry->ItemEntry.ItemGuid == Guid; });
 
@@ -136,16 +200,11 @@ void AFortInventory::Remove(FGuid Guid)
 
     auto Instance = ItemInstance ? *ItemInstance : nullptr;
 
-    if (OnItemInstanceAddedVft && Instance && Instance->ItemEntry.ItemDefinition)
-    {
-        ((bool(*)(const UFortWorldItem*, const IInterface*, uint32_t)) Instance->Vft[OnItemInstanceAddedVft + 1])(Instance, Owner->GetInterface(IFortInventoryOwnerInterface::StaticClass()), Instance->ItemEntry.Count);
-        //((bool(*)(const UFortItemDefinition*, const IInterface*, UFortWorldItem*)) Instance->ItemEntry.ItemDefinition->Vft[OnItemInstanceAddedVft + 1])(Instance->ItemEntry.ItemDefinition, Owner->GetInterface(IFortInventoryOwnerInterface::StaticClass()), Instance);
-    }
 
-    if (VersionInfo.FortniteVersion < 3)
+    auto PlayerController = (AFortPlayerControllerAthena*)Owner;
+    if (VersionInfo.FortniteVersion < 3 && ItemEntryIdx != -1)
     {
-        auto PlayerController = (AFortPlayerControllerAthena*)Owner;
-        auto& QuickBar = IsPrimaryQuickbar(ItemEntry.ItemDefinition) ? PlayerController->QuickBars->PrimaryQuickBar : PlayerController->QuickBars->SecondaryQuickBar;
+        auto& QuickBar = IsPrimaryQuickbar(EntryDef) ? PlayerController->QuickBars->PrimaryQuickBar : PlayerController->QuickBars->SecondaryQuickBar;
         int i = 0;
         for (i = 0; i < QuickBar.Slots.Num(); i++)
         {
@@ -157,10 +216,23 @@ void AFortInventory::Remove(FGuid Guid)
         }
         goto _Skip;
     _Out:
-        PlayerController->QuickBars->EmptySlot(!IsPrimaryQuickbar(ItemEntry.ItemDefinition), i);
+        PlayerController->QuickBars->EmptySlot(!IsPrimaryQuickbar(EntryDef), i);
         PlayerController->QuickBars->ServerRemoveItemInternal(Guid, false, true);
     }
 
+    if (VersionInfo.FortniteVersion >= 14.00 && PlayerController->Pawn)
+    {
+        for (auto& Weapon__Uncasted : PlayerController->Pawn->CurrentWeaponList)
+        {
+            auto Weapon = (AFortWeapon*)Weapon__Uncasted;
+
+            if (Weapon->ItemEntryGuid == Guid)
+            {
+                RemoveWeaponAbilities(Weapon);
+                break;
+            }
+        }
+    }
 _Skip:
 
     bRequiresLocalUpdate = true;
@@ -171,6 +243,11 @@ _Skip:
     Inventory.MarkArrayDirty();
     ForceNetUpdate();
 
+    if (OnItemInstanceAddedVft && Instance && Instance->ItemEntry.ItemDefinition)
+    {
+        ((bool(*)(const UFortWorldItem*, const IInterface*, uint32_t)) Instance->Vft[OnItemInstanceAddedVft + 1])(Instance, Owner->GetInterface(IFortInventoryOwnerInterface::StaticClass()), Instance->ItemEntry.Count);
+        //((bool(*)(const UFortItemDefinition*, const IInterface*, UFortWorldItem*)) Instance->ItemEntry.ItemDefinition->Vft[OnItemInstanceAddedVft + 1])(Instance->ItemEntry.ItemDefinition, Owner->GetInterface(IFortInventoryOwnerInterface::StaticClass()), Instance);
+    }
     //HandleInventoryLocalUpdate();
     //Update(nullptr);
 }
@@ -180,8 +257,9 @@ FFortRangedWeaponStats* AFortInventory::GetStats(UFortWeaponItemDefinition* Def)
     if (!Def || !Def->WeaponStatHandle.DataTable)
         return nullptr;
 
-    auto Val = Def->WeaponStatHandle.DataTable->RowMap.Search([Def](FName& Key, uint8_t* Value) {
-        return Def->WeaponStatHandle.RowName == Key && Value;
+    auto Val = Def->WeaponStatHandle.DataTable->RowMap.Search([Def](FName& Key, uint8_t* Value)
+        {
+            return Def->WeaponStatHandle.RowName == Key && Value;
         });
 
     return Val ? *(FFortRangedWeaponStats**)Val : nullptr;
@@ -191,19 +269,24 @@ FFortRangedWeaponStats* AFortInventory::GetStats(UFortWeaponItemDefinition* Def)
 FFortItemEntry* AFortInventory::MakeItemEntry(const UFortItemDefinition* ItemDefinition, int32 Count, int32 Level)
 {
     auto ItemEntry = (FFortItemEntry*)malloc(FFortItemEntry::Size());
-    __stosb((PBYTE)ItemEntry, 0, FFortItemEntry::Size());
+    memset((PBYTE)ItemEntry, 0, FFortItemEntry::Size());
 
     ItemEntry->MostRecentArrayReplicationKey = -1;
     ItemEntry->ReplicationID = -1;
     ItemEntry->ReplicationKey = -1;
 
-    ItemEntry->ItemDefinition = ItemDefinition;
+    auto ItemDef = ItemDefinition;
+    if (auto MultiWorldItemDef = ItemDef->Cast<UFortWorldMultiItemDefinition>())
+    {
+        ItemDef = MultiWorldItemDef->ItemInfos.Get(rand() % MultiWorldItemDef->ItemInfos.Num(), FFortWorldMultiItemInfo::Size()).ItemDefinition;
+    }
+    ItemEntry->ItemDefinition = ItemDef;
     ItemEntry->Count = Count;
     ItemEntry->Durability = 1.f;
     ItemEntry->GameplayAbilitySpecHandle = FGameplayAbilitySpecHandle(-1);
     ItemEntry->ParentInventory.ObjectIndex = -1;
     ItemEntry->Level = Level;
-    if (auto Weapon = ItemDefinition->IsA<UFortGadgetItemDefinition>() ? (UFortWeaponItemDefinition*)((UFortGadgetItemDefinition*)ItemDefinition)->GetWeaponItemDefinition() : ItemDefinition->Cast<UFortWeaponItemDefinition>())
+    if (auto Weapon = ItemDef->IsA<UFortGadgetItemDefinition>() ? (UFortWeaponItemDefinition*)((UFortGadgetItemDefinition*)ItemDef)->GetWeaponItemDefinition() : ItemDef->Cast<UFortWeaponItemDefinition>())
     {
         auto Stats = GetStats(Weapon);
         if (Stats)
@@ -219,11 +302,11 @@ FFortItemEntry* AFortInventory::MakeItemEntry(const UFortItemDefinition* ItemDef
 }
 
 uint64_t SetPickupItems;
-AFortPickupAthena* AFortInventory::SpawnPickup(FVector Loc, FFortItemEntry& Entry, long long SourceTypeFlag, long long SpawnSource, AFortPlayerPawnAthena* Pawn, int OverrideCount, bool Toss, bool RandomRotation, bool bCombine)
+AFortPickupAthena* AFortInventory::SpawnPickup(FVector Loc, FFortItemEntry& Entry, long long SourceTypeFlag, long long SpawnSource, AFortPlayerPawnAthena* Pawn, int OverrideCount, bool Toss, bool RandomRotation, bool bCombine, const UClass* OverrideClass)
 {
     if (!&Entry)
         return nullptr;
-    AFortPickupAthena* NewPickup = UWorld::SpawnActor<AFortPickupAthena>(Loc, {});
+    AFortPickupAthena* NewPickup = UWorld::SpawnActor<AFortPickupAthena>(OverrideClass ? OverrideClass : AFortPickupAthena::StaticClass(), Loc, {});
     if (!NewPickup)
         return nullptr;
 
@@ -265,15 +348,13 @@ AFortPickupAthena* AFortInventory::SpawnPickup(FVector Loc, FFortItemEntry& Entr
     if (NewPickup->bTossedFromContainer)
         NewPickup->OnRep_TossedFromContainer();
 
-    NewPickup->PickupLocationData.FlyTime -= 1.f;
-
     return NewPickup;
 }
 
-AFortPickupAthena* AFortInventory::SpawnPickup(FVector Loc, const UFortItemDefinition* ItemDefinition, int Count, int LoadedAmmo, long long SourceTypeFlag, long long SpawnSource, AFortPlayerPawnAthena* Pawn, bool Toss, bool bRandomRotation)
+AFortPickupAthena* AFortInventory::SpawnPickup(FVector Loc, const UFortItemDefinition* ItemDefinition, int Count, int LoadedAmmo, long long SourceTypeFlag, long long SpawnSource, AFortPlayerPawnAthena* Pawn, bool Toss, bool bRandomRotation, const UClass* OverrideClass)
 {
     auto ItemEntry = MakeItemEntry(ItemDefinition, Count, -1);
-    auto Pickup = SpawnPickup(Loc, *ItemEntry, SourceTypeFlag, SpawnSource, Pawn, -1, Toss, true, bRandomRotation);
+    auto Pickup = SpawnPickup(Loc, *ItemEntry, SourceTypeFlag, SpawnSource, Pawn, -1, Toss, true, bRandomRotation, OverrideClass);
     free(ItemEntry);
     return Pickup;
 }
@@ -358,16 +439,14 @@ AFortPickupAthena* AFortInventory::SpawnPickup(ABuildingContainer* Container, FF
     NewPickup->bTossedFromContainer = true;
     NewPickup->OnRep_TossedFromContainer();
 
-    NewPickup->PickupLocationData.FlyTime -= 1.f;
-
     return NewPickup;
 }
 
 
 bool AFortInventory::IsPrimaryQuickbar(const UFortItemDefinition* ItemDefinition)
 {
-    return 
-        ItemDefinition->ItemType == EFortItemType::GetWeaponHarvest() || 
+    return
+        ItemDefinition->ItemType == EFortItemType::GetWeaponHarvest() ||
         ItemDefinition->ItemType == EFortItemType::GetWorldResource() ||
         ItemDefinition->ItemType == EFortItemType::GetAmmo() ||
         ItemDefinition->ItemType == EFortItemType::GetTrap() ||
@@ -376,6 +455,8 @@ bool AFortInventory::IsPrimaryQuickbar(const UFortItemDefinition* ItemDefinition
         (ItemDefinition->HasbForceIntoOverflow() && ItemDefinition->bForceIntoOverflow)
         ? false : true;
 }
+
+
 void AFortInventory::UpdateEntry(FFortItemEntry& Entry)
 {
     if (!this)
@@ -387,11 +468,11 @@ void AFortInventory::UpdateEntry(FFortItemEntry& Entry)
     if (ent)
         *ent = Entry;*/
 
-    /*auto ent2 = Inventory.ItemInstances.Search([&](UFortWorldItem* item)
-        { return item->ItemEntry.ItemGuid == Entry.ItemGuid; });
-    if (ent2)
-        (*ent2)->ItemEntry = Entry;*/
-    //__movsb((PBYTE)&(*ent)->ItemEntry, (const PBYTE)&Entry, FFortItemEntry::Size());
+        /*auto ent2 = Inventory.ItemInstances.Search([&](UFortWorldItem* item)
+            { return item->ItemEntry.ItemGuid == Entry.ItemGuid; });
+        if (ent2)
+            (*ent2)->ItemEntry = Entry;*/
+            //memcpy((PBYTE)&(*ent)->ItemEntry, (const PBYTE)&Entry, FFortItemEntry::Size());
 
     Update(&Entry);
 }
@@ -404,22 +485,29 @@ bool RemoveInventoryItem(IInterface* Interface, FGuid& ItemGuid, int Count, bool
     static auto InterfaceOffset = FindClass("FortPlayerController")->GetSuper()->GetPropertiesSize() + (VersionInfo.EngineVersion >= 4.27 ? 16 : 8);
     auto PlayerController = (AFortPlayerControllerAthena*)(__int64(Interface) - InterfaceOffset);
 
+    if (PlayerController->bInfiniteAmmo)
+        return true;
+
     auto ItemP = PlayerController->WorldInventory->Inventory.ItemInstances.Search([&](UFortWorldItem* entry)
         { return entry->ItemEntry.ItemGuid == ItemGuid; });
+    auto itemEntry = PlayerController->WorldInventory->Inventory.ReplicatedEntries.Search([&](FFortItemEntry& entry)
+        { return entry.ItemGuid == ItemGuid; }, FFortItemEntry::Size());
 
     if (ItemP)
     {
+
         auto Item = *ItemP;
 
-        for (int i = 0; i < Item->ItemEntry.StateValues.Num(); i++)
+        /*for (int i = 0; i < itemEntry->StateValues.Num(); i++)
         {
-            auto& StateValue = Item->ItemEntry.StateValues.Get(i, FFortItemEntryStateValue::Size());
+            auto& StateValue = itemEntry->StateValues.Get(i, FFortItemEntryStateValue::Size());
 
             if (StateValue.StateType != 2)
                 continue;
 
             StateValue.IntValue = 0;
-        }
+        }*/
+
 
         Item->ItemEntry.Count -= max(Count, 0);
         if (Count < 0 || Item->ItemEntry.Count <= 0 || bForceRemoval)
@@ -430,7 +518,20 @@ bool RemoveInventoryItem(IInterface* Interface, FGuid& ItemGuid, int Count, bool
                     { return item.ItemDefinition == Item->ItemEntry.ItemDefinition && item.ItemGuid != ItemGuid; }, FFortItemEntry::Size());
 
                 if (!OtherStack)
+                {
+                    /*for (int i = 0; i < itemEntry->StateValues.Num(); i++)
+                    {
+                        auto& StateValue = itemEntry->StateValues.Get(i, FFortItemEntryStateValue::Size());
+
+                        if (StateValue.StateType != 2)
+                            continue;
+
+                        StateValue.IntValue = 0;
+                        break;
+                    }*/
+
                     PlayerController->WorldInventory->UpdateEntry(Item->ItemEntry);
+                }
                 else
                     PlayerController->WorldInventory->Remove(ItemGuid);
             }
@@ -438,7 +539,20 @@ bool RemoveInventoryItem(IInterface* Interface, FGuid& ItemGuid, int Count, bool
                 PlayerController->WorldInventory->Remove(ItemGuid);
         }
         else
+        {
+            /*for (int i = 0; i < itemEntry->StateValues.Num(); i++)
+            {
+                auto& StateValue = itemEntry->StateValues.Get(i, FFortItemEntryStateValue::Size());
+
+                if (StateValue.StateType != 2)
+                    continue;
+
+                StateValue.IntValue = 0;
+                break;
+            }*/
+
             PlayerController->WorldInventory->UpdateEntry(Item->ItemEntry);
+        }
 
         return true;
     }
@@ -488,6 +602,7 @@ void AFortInventory::PostLoadHook()
 {
     SetPickupItems = FindSetPickupItems();
     OnItemInstanceAddedVft = FindOnItemInstanceAddedVft();
+    ClearAbility_ = FindClearAbility();
 
     Utils::Hook(FindRemoveInventoryItem(), RemoveInventoryItem);
 

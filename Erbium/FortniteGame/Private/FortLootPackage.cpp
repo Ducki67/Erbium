@@ -33,6 +33,7 @@ int GetLevel(const FDataTableCategoryHandle& CategoryHandle)
 
 	int Level = 0;
 	FFortLootLevelData* LootLevelData = nullptr;
+	
 	for (auto& LootLevelDataPair : (TMap<FName, FFortLootLevelData*>)CategoryHandle.DataTable->RowMap)
 	{
 		if ((FFortLootLevelData::HasCategory() ? LootLevelDataPair.Value()->Category : LootLevelDataPair.Value()->category) != CategoryHandle.RowContents || LootLevelDataPair.Value()->LootLevel > GameState->WorldLevel || LootLevelDataPair.Value()->LootLevel <= Level)
@@ -83,7 +84,8 @@ void UFortLootPackage::SetupLDSForPackage(TArray<FFortItemEntry*>& LootDrops, SD
 				continue;
 			if (i != -1 && Val->LootPackageCategory != i)
 				continue;
-			if (WorldLevel >= 0) {
+			if (WorldLevel >= 0)
+			{
 				if (Val->MaxWorldLevel >= 0 && WorldLevel > Val->MaxWorldLevel)
 					continue;
 				if (Val->MinWorldLevel >= 0 && WorldLevel < Val->MinWorldLevel)
@@ -102,7 +104,8 @@ void UFortLootPackage::SetupLDSForPackage(TArray<FFortItemEntry*>& LootDrops, SD
 
 			if (i != -1 && Val->LootPackageCategory != i)
 				continue;
-			if (WorldLevel >= 0) {
+			if (WorldLevel >= 0)
+			{
 				if (Val->MaxWorldLevel >= 0 && WorldLevel > Val->MaxWorldLevel)
 					continue;
 				if (Val->MinWorldLevel >= 0 && WorldLevel < Val->MinWorldLevel)
@@ -115,7 +118,8 @@ void UFortLootPackage::SetupLDSForPackage(TArray<FFortItemEntry*>& LootDrops, SD
 	if (LPGroups.Num() == 0)
 		return;
 
-	auto LootPackage = PickWeighted(LPGroups, [](float Total) { return ((float)rand() / 32767.f) * Total; });
+	auto LootPackage = PickWeighted(LPGroups, [](float Total)
+		{ return ((float)rand() / 32767.f) * Total; });
 	if (!LootPackage)
 		return;
 
@@ -142,7 +146,8 @@ void UFortLootPackage::SetupLDSForPackage(TArray<FFortItemEntry*>& LootDrops, SD
 		{
 			LootDrop->Count += LootPackage->Count;
 
-			if (LootDrop->Count > ItemDefinition->GetMaxStackSize()) {
+			if (LootDrop->Count > ItemDefinition->GetMaxStackSize())
+			{
 				auto OGCount = LootDrop->Count;
 				LootDrop->Count = ItemDefinition->GetMaxStackSize();
 
@@ -158,7 +163,8 @@ void UFortLootPackage::SetupLDSForPackage(TArray<FFortItemEntry*>& LootDrops, SD
 		{
 			LootDrop->Count += AmmoDef->DropCount;
 
-			if (LootDrop->Count > AmmoDef->GetMaxStackSize()) {
+			if (LootDrop->Count > AmmoDef->GetMaxStackSize())
+	{
 				auto OGCount = LootDrop->Count;
 				LootDrop->Count = AmmoDef->GetMaxStackSize();
 
@@ -208,14 +214,17 @@ TArray<FFortItemEntry*> UFortLootPackage::ChooseLootForContainer(FName TierGroup
 		}
 	}
 
-
-	auto LootTierData = PickWeighted(TierDataGroups, [](float Total) { return ((float)rand() / 32767.f) * Total; });
+	auto LootTierData = PickWeighted(TierDataGroups, [](float Total)
+		{ return ((float)rand() / 32767.f) * Total; });
 	if (!LootTierData)
 		return {};
+	
+	//printf("Picked LootTierData %s\n", LootTierData->LootPackage.ToString().c_str());
 
 	if (LootTierData->NumLootPackageDrops <= 0)
 		return {};
 
+	//printf("Selecting %f loot drops from <unk>\n", LootTierData->NumLootPackageDrops);
 	if (VersionInfo.FortniteVersion >= 11)
 	{
 		auto& MinArr = LootTierData->LootPackageCategoryMinArray;
@@ -239,6 +248,7 @@ TArray<FFortItemEntry*> UFortLootPackage::ChooseLootForContainer(FName TierGroup
 		if (RemainderSomething > 0.0000099999997f)
 			DropCount += RemainderSomething >= ((float)rand() / 32767);
 	}
+	//printf("Actual number of loot drops is: %i\n", DropCount);
 
 	float AmountOfLootDrops = 0;
 	float MinLootDrops = 0;
@@ -249,7 +259,7 @@ TArray<FFortItemEntry*> UFortLootPackage::ChooseLootForContainer(FName TierGroup
 		AmountOfLootDrops += Min;
 	}
 
-	int SumWeights = 0;
+	/*int SumWeights = 0;
 
 	for (int i = 0; i < LootTierData->LootPackageCategoryWeightArray.Num(); ++i)
 		if (LootTierData->LootPackageCategoryWeightArray[i] > 0 && (LootTierData->LootPackageCategoryMaxArray[i] < 0 || 0 < LootTierData->LootPackageCategoryMaxArray[i]))
@@ -260,7 +270,8 @@ TArray<FFortItemEntry*> UFortLootPackage::ChooseLootForContainer(FName TierGroup
 		{
 			AmountOfLootDrops++;
 
-			if (AmountOfLootDrops >= DropCount) {
+			if (AmountOfLootDrops >= DropCount)
+			{
 				//AmountOfLootDrops = AmountOfLootDrops;
 				break;
 			}
@@ -269,7 +280,7 @@ TArray<FFortItemEntry*> UFortLootPackage::ChooseLootForContainer(FName TierGroup
 		}
 
 	if (!AmountOfLootDrops)
-		return {};
+		return {};*/
 
 	TArray<FFortItemEntry*> LootDrops;
 	LootDrops.Reserve((int)DropCount);
@@ -279,6 +290,8 @@ TArray<FFortItemEntry*> UFortLootPackage::ChooseLootForContainer(FName TierGroup
 	int CurrentCategory = 0;
 	while (SpawnedItems < DropCount && CurrentCategory < LootTierData->LootPackageCategoryMinArray.Num())
 	{
+		if (LootTierData->LootPackageCategoryMaxArray[CurrentCategory] != -1)
+			printf("Min: %d, Max: %d, Weight: %d\n", LootTierData->LootPackageCategoryMinArray[CurrentCategory], LootTierData->LootPackageCategoryMaxArray[CurrentCategory], LootTierData->LootPackageCategoryWeightArray[CurrentCategory]);
 		for (int j = 0; j < LootTierData->LootPackageCategoryMinArray[CurrentCategory]; j++)
 			SetupLDSForPackage(LootDrops, LootTierData->LootPackage, CurrentCategory, TierGroup, WorldLevel);
 
@@ -330,10 +343,10 @@ bool UFortLootPackage::SpawnLootHook(ABuildingContainer* Container)
 	}
 	else
 	{
-		static auto Loot_Treasure = UKismetStringLibrary::Conv_StringToName(FString(L"Loot_Treasure"));
-		static auto Loot_Ammo = UKismetStringLibrary::Conv_StringToName(FString(L"Loot_Ammo"));
-		static auto Loot_AthenaTreasure = UKismetStringLibrary::Conv_StringToName(FString(L"Loot_AthenaTreasure"));
-		static auto Loot_AthenaAmmoLarge = UKismetStringLibrary::Conv_StringToName(FString(L"Loot_AthenaAmmoLarge"));
+		static auto Loot_Treasure = FName(L"Loot_Treasure");
+		static auto Loot_Ammo = FName(L"Loot_Ammo");
+		static auto Loot_AthenaTreasure = FName(L"Loot_AthenaTreasure");
+		static auto Loot_AthenaAmmoLarge = FName(L"Loot_AthenaAmmoLarge");
 
 		if (Container->SearchLootTierGroup == Loot_Treasure)
 			RealTierGroup = Loot_AthenaTreasure;
@@ -374,10 +387,10 @@ void UFortLootPackage::SpawnLoot(FName& TierGroup, FVector Loc)
 	}
 	else
 	{
-		static auto Loot_Treasure = UKismetStringLibrary::Conv_StringToName(FString(L"Loot_Treasure"));
-		static auto Loot_Ammo = UKismetStringLibrary::Conv_StringToName(FString(L"Loot_Ammo"));
-		static auto Loot_AthenaTreasure = UKismetStringLibrary::Conv_StringToName(FString(L"Loot_AthenaTreasure"));
-		static auto Loot_AthenaAmmoLarge = UKismetStringLibrary::Conv_StringToName(FString(L"Loot_AthenaAmmoLarge"));
+		static auto Loot_Treasure = FName(L"Loot_Treasure");
+		static auto Loot_Ammo = FName(L"Loot_Ammo");
+		static auto Loot_AthenaTreasure = FName(L"Loot_AthenaTreasure");
+		static auto Loot_AthenaAmmoLarge = FName(L"Loot_AthenaAmmoLarge");
 
 		if (TierGroup == Loot_Treasure)
 			RealTierGroup = Loot_AthenaTreasure;
@@ -443,29 +456,45 @@ void UFortLootPackage::SpawnConsumableActor(ABGAConsumableSpawner* Spawner)
 
 	auto ItemDefinition = (UBGAConsumableWrapperItemDefinition*)LootDrops[0]->ItemDefinition;
 
-	auto GroundLoc = UFortKismetLibrary::FindGroundLocationAt(UWorld::GetWorld(), nullptr, Spawner->K2_GetActorLocation(), -1000.f, 2500.f, UKismetStringLibrary::Conv_StringToName(FString(L"FortDynamicMeshPhysics")));
+	auto GroundLoc = UFortKismetLibrary::FindGroundLocationAt(UWorld::GetWorld(), nullptr, Spawner->K2_GetActorLocation(), -1000.f, 2500.f, FName(L"FortDynamicMeshPhysics"));
 	auto SpawnTransform = FTransform(GroundLoc, Spawner->K2_GetActorRotation());
 
-	UWorld::SpawnActor(ItemDefinition->ConsumableClass, SpawnTransform);
+	auto Class = ItemDefinition->ConsumableClass.Get();
+	if (Class)
+		UWorld::SpawnActor(Class, SpawnTransform);
 
 	for (auto& LootDrop : LootDrops)
 		free(LootDrop);
 }
 
-void PostUpdate(ABuildingSMActor* BuildingSMActor)
+void (*OnAuthorityRandomUpgradeAppliedOG)(ABuildingContainer*, FName&);
+void OnAuthorityRandomUpgradeApplied(ABuildingContainer* Container, FName& UpgradeTierGroup)
 {
-	if (auto Container = BuildingSMActor->Cast<ABuildingContainer>())
+	auto ChosenRandomUpgrade = Container->ChosenRandomUpgrade;
+
+	if (Container->HasAlternateMeshes())
 	{
-		auto ChosenRandomUpgrade = Container->ChosenRandomUpgrade;
+		if (ChosenRandomUpgrade < 0 || ChosenRandomUpgrade >= Container->AlternateMeshes.Num())
+			return OnAuthorityRandomUpgradeAppliedOG(Container, UpgradeTierGroup);
 
-		if (ChosenRandomUpgrade < 0 || ChosenRandomUpgrade >= BuildingSMActor->AlternateMeshes.Num())
-			return;
-
-		auto& AlternateMeshSet = BuildingSMActor->AlternateMeshes[ChosenRandomUpgrade];
+		auto& AlternateMeshSet = Container->AlternateMeshes[ChosenRandomUpgrade];
 
 		Container->ReplicatedLootTier = AlternateMeshSet.Tier;
 		Container->OnRep_LootTier();
 	}
+	else
+	{
+		auto ClassData = Container->GetClassData();
+		if (ChosenRandomUpgrade < 0 || ChosenRandomUpgrade >= ClassData->AlternateMeshes.Num())
+			return OnAuthorityRandomUpgradeAppliedOG(Container, UpgradeTierGroup);
+
+		auto& AlternateMeshSet = ClassData->AlternateMeshes[ChosenRandomUpgrade];
+
+		Container->ReplicatedLootTier = AlternateMeshSet.Tier;
+		Container->OnRep_LootTier();
+	}
+
+	return OnAuthorityRandomUpgradeAppliedOG(Container, UpgradeTierGroup);
 }
 
 bool bDidntFind = false;
@@ -474,9 +503,9 @@ void UFortLootPackage::Hook()
 	if (VersionInfo.FortniteVersion >= 11.00)
 	{
 		Utils::Hook(FindSpawnLoot(), SpawnLootHook);
-		auto PostUpdate_ = Memcury::Scanner::FindStringRef(L"ABuildingSMActor::PostUpdate() Building: %s, AltMeshIdx: %d", false, 0, VersionInfo.FortniteVersion >= 19).ScanFor({ 0x40, 0x53 }, false).Get();
 
-		Utils::Hook(PostUpdate_, PostUpdate);
+		auto OnAuthorityRandomUpgradeAppliedAddr = FindFunctionCall(L"OnAuthorityRandomUpgradeApplied", std::vector<uint8_t>{ 0x48, 0x89, 0x5C });
+		Utils::Hook(OnAuthorityRandomUpgradeAppliedAddr, OnAuthorityRandomUpgradeApplied, OnAuthorityRandomUpgradeAppliedOG);
 		return;
 	}
 	else
