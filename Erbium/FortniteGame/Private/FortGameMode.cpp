@@ -76,7 +76,7 @@ void SetupPlaylist(AFortGameMode* GameMode, AFortGameStateAthena* GameState)
             if (Playlist->HasbForceRespawnLocationInsideOfVolume())
                 Playlist->bForceRespawnLocationInsideOfVolume = true;
         }
-        if (VersionInfo.FortniteVersion >= 19)
+        //if (VersionInfo.FortniteVersion >= 16)
         {
             if (Playlist->HasGarbageCollectionFrequency())
                 Playlist->GarbageCollectionFrequency = 9999999999999999.f; // easier than hooking collectgarbage
@@ -884,9 +884,9 @@ void AFortGameMode::ReadyToStartMatch_(UObject* Context, FFrame& Stack, bool* Re
                 { return acc + p.second; });
         }
 
-        //GameMode->DefaultPawnClass = FindObject<UClass>(L"/Game/Athena/PlayerPawn_Athena.PlayerPawn_Athena_C");
+        GameMode->DefaultPawnClass = FindObject<UClass>(L"/Game/Athena/PlayerPawn_Athena.PlayerPawn_Athena_C");
 
-        /*if (VersionInfo.EngineVersion == 4.16)
+        if (VersionInfo.EngineVersion == 4.16)
         {
             auto sRef = Memcury::Scanner::FindStringRef(L"CollectGarbageInternal() is flushing async loading").Get();
             uint64_t CollectGarbage = 0;
@@ -916,7 +916,7 @@ void AFortGameMode::ReadyToStartMatch_(UObject* Context, FFrame& Stack, bool* Re
 
                 Utils::Patch<uint8_t>(CollectGarbage, 0xC3);
             }
-        }*/
+        }
 
         if (GameState->HasAllPlayerBuildableClassesIndexLookup())
             for (auto& [Class, Handle] : GameState->AllPlayerBuildableClassesIndexLookup)
@@ -1450,11 +1450,6 @@ void AFortGameMode::HandleStartingNewPlayer_(UObject* Context, FFrame& Stack)
 
     PlayerState->WorldPlayerId = WorldPlayerId;
 
-    if (wcsstr(FConfiguration::Playlist, L"/Game/Athena/Playlists/Creative/Playlist_PlaygroundV2.Playlist_PlaygroundV2"))
-    { 
-        AFortAthenaCreativePortal::Create(NewPlayer);
-    }
-
     return callOG(GameMode, Stack.GetCurrentNativeFunction(), HandleStartingNewPlayer, NewPlayer);
 }
 
@@ -1751,7 +1746,8 @@ void StartNewSafeZonePhase(AFortGameMode* GameMode, int NewSafeZonePhase)
         SafeZoneState = 2;
 
         GameMode->SafeZoneIndicator->OnSafeZoneStateChange(2, false);
-        GameMode->SafeZoneIndicator->SafezoneStateChangedDelegate.Process(GameMode->SafeZoneIndicator, 2);
+        if (GameMode->SafeZoneIndicator->HasSafezoneStateChangedDelegate())
+            GameMode->SafeZoneIndicator->SafezoneStateChangedDelegate.Process(GameMode->SafeZoneIndicator, 2);
     }
 }
 

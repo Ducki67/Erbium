@@ -12,6 +12,7 @@
 #include "../Public/FortPhysicsPawn.h"
 #include "../Public/BattleRoyaleGamePhaseLogic.h"
 #include "../../Erbium/Public/GUI.h"
+#include <FortniteGame/Public/FortAthenaCreativePortal.h>
 
 void AFortPlayerControllerAthena::GetPlayerViewPoint(AFortPlayerControllerAthena* PlayerController, FVector& Loc, FRotator& Rot)
 {
@@ -66,7 +67,7 @@ void AFortPlayerControllerAthena::ServerAcknowledgePossession(UObject* Context, 
 		if (FConfiguration::bLateGame)
 			PlayerController->MyFortPawn->SetShield(100.f);
 	}
-	if (!FConfiguration::bKeepInventory || FConfiguration::bLateGame)
+	if ((!FConfiguration::bKeepInventory || FConfiguration::bLateGame) && PlayerController->WorldInventory)
 	{	
 		UEAllocatedVector<FGuid> GuidsToRemove;
 		for (int i = 0; i < PlayerController->WorldInventory->Inventory.ReplicatedEntries.Num(); i++)
@@ -129,6 +130,9 @@ void AFortPlayerControllerAthena::ServerAcknowledgePossession(UObject* Context, 
 			if (StartingItem.Count && (!SmartItemDefClass || !StartingItem.Item->IsA(SmartItemDefClass)))
 				PlayerController->WorldInventory->GiveItem(StartingItem.Item, StartingItem.Count);
 		}
+
+		if (wcsstr(FConfiguration::Playlist, L"/Game/Athena/Playlists/Creative/Playlist_PlaygroundV2.Playlist_PlaygroundV2"))
+			AFortAthenaCreativePortal::Create(PlayerController);
 	}
 	else if (FConfiguration::bLateGame && (!FConfiguration::bKeepInventory || FConfiguration::bLateGame))
 	{
@@ -525,7 +529,9 @@ void AFortPlayerControllerAthena::ServerCreateBuildingActor(UObject* Context, FF
 		PayBuildableClassPlacementCost(PlayerController, BuildingClassData);
 	}
 
-	Building->Team = ((AFortPlayerStateAthena*)PlayerController->PlayerState)->TeamIndex;
+	if (((AFortPlayerStateAthena*)PlayerController->PlayerState)->HasTeamIndex()) 
+		Building->Team = ((AFortPlayerStateAthena*)PlayerController->PlayerState)->TeamIndex;
+	
 	if (Building->HasTeamIndex())
 		Building->TeamIndex = Building->Team;
 }
@@ -959,6 +965,8 @@ void AFortPlayerControllerAthena::ClientOnPawnDied(AFortPlayerControllerAthena* 
 			PlayerState->DeathInfo.DeathLocation = PlayerState->HasPawnDeathLocation() ? PlayerState->PawnDeathLocation : (PlayerController->Pawn ? PlayerController->Pawn->K2_GetActorLocation() : FVector());
 		if (FDeathInfo::HasDeathTags())
 			PlayerState->DeathInfo.DeathTags = DeathReport.Tags;
+		if (FDeathInfo::HasDeathClassSlot())
+			PlayerState->DeathInfo.DeathClassSlot = -1;
 		PlayerState->DeathInfo.DeathCause = ToDeathCause(PlayerController->Pawn, DeathReport.Tags, PlayerState->DeathInfo.bDBNO);
 		//PlayerState->DeathInfo.Downer = KillerPlayerState;
 		if (FDeathInfo::HasFinisherOrDowner())
@@ -1145,6 +1153,12 @@ void AFortPlayerControllerAthena::ServerClientIsReadyToRespawn(UObject* Context,
 	}
 }
 
+struct FCustomCharacterParts
+{
+public:
+	USCRIPTSTRUCT_COMMON_MEMBERS(FCustomCharacterParts);
+};
+
 void AFortPlayerControllerAthena::InternalPickup(FFortItemEntry* PickupEntry)
 {
 	if (!PickupEntry || !PickupEntry->ItemDefinition)
@@ -1171,7 +1185,7 @@ void AFortPlayerControllerAthena::InternalPickup(FFortItemEntry* PickupEntry)
 	ForwardVector.Normalize();
 
 	FinalLoc = FinalLoc + ForwardVector * 450.f;
-	FinalLoc.Z += 50.f;
+	FinalLoc.Z += 20.f;
 
 	const float RandomAngleVariation = ((float)rand() * 0.00109866634f) - 18.f;
 	const float FinalAngle = RandomAngleVariation * 0.017453292519943295f;
@@ -1318,6 +1332,8 @@ std::map<std::string, std::vector<FVector>> Waypoints;
 
 extern uint64_t ApplyCharacterCustomization;
 extern uint64_t NotifyGameMemberAdded_;
+
+int32 PlayerBotID = 0;
 void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 {
 	FString Msg;
@@ -1378,12 +1394,12 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 				auto GamePhaseLogic = UFortGameStateComponent_BattleRoyaleGamePhaseLogic::Get(UWorld::GetWorld());
 
 				GamePhaseLogic->StartAircraftPhase();
-				PlayerController->ClientMessage(FString(L"Started the aircraft!"), FName(), 1);
+				PlayerController->ClientMessage(FString(L"Started the aircraft!"), FName(), 1.f);
 			}
 			else
 			{
 				UKismetSystemLibrary::ExecuteConsoleCommand(UWorld::GetWorld(), FString(L"startaircraft"), nullptr);
-				PlayerController->ClientMessage(FString(L"Started the aircraft!"), FName(), 1);
+				PlayerController->ClientMessage(FString(L"Started the aircraft!"), FName(), 1.f);
 			}
 		}
 		else if (command == "resumesafezone")
@@ -1392,7 +1408,7 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 			if (GameMode->HasbSafeZonePaused())
 				GameMode->bSafeZonePaused = false;
 			UKismetSystemLibrary::ExecuteConsoleCommand(UWorld::GetWorld(), FString(L"startsafezone"), nullptr);
-			PlayerController->ClientMessage(FString(L"Resumed the safe zone."), FName(), 1);
+			PlayerController->ClientMessage(FString(L"Resumed the safe zone."), FName(), 1.f);
 		}
 		else if (command == "pausesafezone")
 		{
@@ -1400,7 +1416,7 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 			if (GameMode->HasbSafeZonePaused())
 				GameMode->bSafeZonePaused = true;
 			UKismetSystemLibrary::ExecuteConsoleCommand(UWorld::GetWorld(), FString(L"pausesafezone"), nullptr);
-			PlayerController->ClientMessage(FString(L"Paused the safe zone."), FName(), 1);
+			PlayerController->ClientMessage(FString(L"Paused the safe zone."), FName(), 1.f);
 		}
 		else if (command == "skipsafezone")
 		{
@@ -1423,7 +1439,7 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 				}
 			}
 
-			PlayerController->ClientMessage(FString(L"Currently skipping the zone."), FName(), 1);
+			PlayerController->ClientMessage(FString(L"Currently skipping the zone."), FName(), 1.f);
 			//UKismetSystemLibrary::ExecuteConsoleCommand(UWorld::GetWorld(), FString(L"skipsafezone"), nullptr);
 		}
 		else if (command == "startshrinksafezone")
@@ -1442,7 +1458,7 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 					GamePhaseLogic->SafeZoneIndicator->SafeZoneStartShrinkTime = (float)UGameplayStatics::GetTimeSeconds(UWorld::GetWorld());
 			}
 
-			PlayerController->ClientMessage(FString(L"Started shrinking the zone."), FName(), 1);
+			PlayerController->ClientMessage(FString(L"Started shrinking the zone."), FName(), 1.f);
 
 			//UKismetSystemLibrary::ExecuteConsoleCommand(UWorld::GetWorld(), FString(L"startshrinksafezone"), nullptr);
 		}
@@ -1454,7 +1470,7 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 		{
 			if (args.size() != 2)
 			{
-				PlayerController->ClientMessage(FString(L"Wrong number of arguments!"), FName(), 1);
+				PlayerController->ClientMessage(FString(L"Wrong number of arguments!"), FName(), 1.f);
 				return;
 			}
 
@@ -1466,7 +1482,7 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 		else if (command == "god")
 		{
 			PlayerController->Pawn->bCanBeDamaged ^= 1;
-			PlayerController->ClientMessage(FString(L"Toggled god mode!"), FName(), 1);
+			PlayerController->ClientMessage(FString(L"Toggled god mode!"), FName(), 1.f);
 		}
 		else if (command == "speed")
 		{
@@ -1477,7 +1493,7 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 				try { Speed = std::stof(std::string(args[1])); }
 				catch (...)
 				{
-					PlayerController->ClientMessage(FString(L"Invalid speed value"), FName(), 1);
+					PlayerController->ClientMessage(FString(L"Invalid speed value"), FName(), 1.f);
 					return;
 				}
 			}
@@ -1486,7 +1502,7 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 
 			if (!Pawn)
 			{
-				PlayerController->ClientMessage(FString(L"No pawn to set speed"), FName(), 1);
+				PlayerController->ClientMessage(FString(L"No pawn to set speed"), FName(), 1.f);
 				return;
 			}
 
@@ -1499,13 +1515,13 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 				return;
 
 			Pawn->ProcessEvent(SetMovementSpeedFn, &Speed);
-			PlayerController->ClientMessage(FString(L"Set player speed!"), FName(), 1);
+			PlayerController->ClientMessage(FString(L"Set player speed!"), FName(), 1.f);
 		}
 		else if (command == "timeofday" || command == "time" || command == "t")
 		{
 			if (args.size() < 2)
 			{
-				PlayerController->ClientMessage(FString(L"Wrong number of arguments!"), FName(), 1);
+				PlayerController->ClientMessage(FString(L"Wrong number of arguments!"), FName(), 1.f);
 				return;
 
 			}
@@ -1515,15 +1531,17 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 			catch (...) {}
 
 			UFortKismetLibrary::SetTimeOfDay(UWorld::GetWorld(), NewTOD);
-			PlayerController->ClientMessage(FString(L"Set time of day!"), FName(), 1);
+			PlayerController->ClientMessage(FString(L"Set time of day!"), FName(), 1.f);
 		}
 		else if (command == "spawnbot")
 		{
+			auto CallerController = PlayerController;
 			int Count = 1;
 
 			if (args.size() >= 2)
 			{
-				Count = std::stoi(args[1].c_str(), nullptr);
+				try { Count = std::stoi(args[1].c_str(), nullptr); }
+				catch (...) {}
 			}
 
 			for (int i = 0; i < Count; i++)
@@ -1551,7 +1569,7 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 				Pawn->OnRep_PlayerState();
 
 				Pawn->SetMaxHealth(100.f);
-				Pawn->SetHealth(100.f);
+				//Pawn->SetHealth(100.f);
 
 				PlayerState->TeamIndex = AFortGameMode::PickTeam(GameMode, 0, PlayerController);
 				if (PlayerState->HasSquadId())
@@ -1599,10 +1617,30 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 				static auto Commando2 = FindObject(L"/Game/Athena/Heroes/HID_Commando_Athena_01.HID_Commando_Athena_01", nullptr);
 				PlayerState->HeroType = Commando ? Commando : Commando2;
 
-				static auto CharacterPartsOffset = PlayerState->GetOffset("CharacterParts");
-				if (CharacterPartsOffset != -1)
+
+				static auto CharacterPartsOffset = PlayerState->GetOffset("CharacterParts", 0x100000);
+
+				if (CharacterPartsOffset == -1)
 				{
-					auto& CharacterParts = GetFromOffset<const UObject * [0x6]>(PlayerState, CharacterPartsOffset);
+					static auto CharacterPartsOff = PlayerState->GetOffset("CharacterParts");
+					if (CharacterPartsOff == -1)
+						CharacterPartsOff = PlayerState->GetOffset("LocalCharacterParts");
+					auto& CharacterParts = GetFromOffset<const UObject * [0x6]>(PlayerState, CharacterPartsOff);
+
+					static auto Head = FindObject<UObject>(L"/Game/Characters/CharacterParts/Female/Medium/Heads/F_Med_Head1.F_Med_Head1");
+					static auto Body = FindObject<UObject>(L"/Game/Characters/CharacterParts/Female/Medium/Bodies/F_Med_Soldier_01.F_Med_Soldier_01");
+					static auto Backpack = FindObject<UObject>(L"/Game/Characters/CharacterParts/Backpacks/NoBackpack.NoBackpack");
+
+					CharacterParts[0] = Head;
+					CharacterParts[1] = Body;
+					CharacterParts[3] = Backpack;
+				}
+				else
+				{
+					static auto CharacterPartsOff = PlayerState->GetOffset("CharacterParts");
+					auto& CustomCharacterParts = GetFromOffset<FCustomCharacterParts>(PlayerState, CharacterPartsOff);
+					static auto PartsOffset = FCustomCharacterParts::StaticStruct()->GetOffset("Parts");
+					auto& CharacterParts = GetFromOffset<const UObject * [0x6]>(&CustomCharacterParts, PartsOffset);
 
 					static auto Head = FindObject<UObject>(L"/Game/Characters/CharacterParts/Female/Medium/Heads/F_Med_Head1.F_Med_Head1");
 					static auto Body = FindObject<UObject>(L"/Game/Characters/CharacterParts/Female/Medium/Bodies/F_Med_Soldier_01.F_Med_Soldier_01");
@@ -1615,6 +1653,24 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 				
 				if (ApplyCharacterCustomization)
 					((void (*)(AActor*, AFortPlayerPawnAthena*)) ApplyCharacterCustomization)(PlayerState, Pawn);
+
+				PlayerBotID++;
+				std::string Name = "Erbium Bot (#" + std::to_string(PlayerBotID) + ")";
+
+				std::wstring WideName(Name.begin(), Name.end());
+
+				FString BotName = FString(WideName.c_str());
+
+				if (std::floor(VersionInfo.FortniteVersion) < 9)
+				{
+					PlayerController->ServerChangeName(BotName);
+				}
+				else
+				{
+					GameMode->ChangeName(PlayerController, BotName, true);
+				}
+
+				PlayerState->OnRep_PlayerName();
 
 				/*static auto DefaultPickaxe = FindObject<UFortItemDefinition>(L"/Game/Athena/Items/Weapons/WID_Harvest_Pickaxe_Athena_C_T01.WID_Harvest_Pickaxe_Athena_C_T01");
 
@@ -1630,7 +1686,7 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 						PlayerController->WorldInventory->GiveItem(StartingItem.Item, StartingItem.Count);
 				}*/
 
-				PlayerController->ClientMessage(FString(L"Spawned a player bot!"), FName(), 1);
+				//CallerController->ClientMessage(FString(L"Spawned a player bot!"), FName(), 1.f); // todo: fix
 			}
 		}
 		else if (command == "startevent")
@@ -1642,7 +1698,7 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 		{
 			if (args.size() != 4)
 			{
-				PlayerController->ClientMessage(FString(L"Wrong number of arguments!"), FName(), 1);
+				PlayerController->ClientMessage(FString(L"Wrong number of arguments!"), FName(), 1.f);
 				return;
 			}
 
@@ -1655,14 +1711,14 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 			if (PlayerController->Pawn)
 			{
 				PlayerController->Pawn->K2_SetActorLocation(FVector(X, Y, Z), false, nullptr, true);
-				PlayerController->ClientMessage(FString(L"Teleported to location!"), FName(), 1);
+				PlayerController->ClientMessage(FString(L"Teleported to location!"), FName(), 1.f);
 			}
 		}
 		else if (command == "launch" || command == "launchpawn")
 		{
 			if (args.size() != 4)
 			{
-				PlayerController->ClientMessage(FString(L"Wrong number of arguments!"), FName(), 1);
+				PlayerController->ClientMessage(FString(L"Wrong number of arguments!"), FName(), 1.f);
 				return;
 			}
 
@@ -1675,14 +1731,14 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 			if (PlayerController->Pawn)
 			{
 				PlayerController->Pawn->LaunchCharacterJump(FVector(X, Y, Z), false, nullptr, true);
-				PlayerController->ClientMessage(FString(L"Launched player!"), FName(), 1);
+				PlayerController->ClientMessage(FString(L"Launched player!"), FName(), 1.f);
 			}
 		}
 		else if (command == "savewaypoint" || command == "s")
 		{
 			if (args.size() < 2)
 			{
-				PlayerController->ClientMessage(FString(L"Please provide a phrase to save the waypoint to."), FName(), 1);
+				PlayerController->ClientMessage(FString(L"Please provide a phrase to save the waypoint to."), FName(), 1.f);
 				return;
 			}
 
@@ -1690,7 +1746,7 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 
 			if (!Pawn)
 			{
-				PlayerController->ClientMessage(FString(L"Couldn't find a pawn!"), FName(), 1);
+				PlayerController->ClientMessage(FString(L"Couldn't find a pawn!"), FName(), 1.f);
 				return;
 			}
 
@@ -1698,7 +1754,7 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 
 			if (PawnLocation.X == 0.0f && PawnLocation.Y == 0.0f && PawnLocation.Z == 0.0f)
 			{
-				PlayerController->ClientMessage(FString(L"Failed to save a waypoint."), FName(), 1);
+				PlayerController->ClientMessage(FString(L"Failed to save a waypoint."), FName(), 1.f);
 				return;
 			}
 
@@ -1713,7 +1769,7 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 					It->second.clear();
 					It->second.push_back(PawnLocation);
 
-					PlayerController->ClientMessage(FString(L"Waypoint overridden successfully!"), FName(), 1);
+					PlayerController->ClientMessage(FString(L"Waypoint overridden successfully!"), FName(), 1.f);
 				}
 				else
 				{
@@ -1733,7 +1789,7 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 		{
 			if (args.size() < 2)
 			{
-				PlayerController->ClientMessage(FString(L"Please provide a waypoint phrase to teleport to."), FName(), 1);
+				PlayerController->ClientMessage(FString(L"Please provide a waypoint phrase to teleport to."), FName(), 1.f);
 				return;
 			}
 
@@ -1743,7 +1799,7 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 
 			if (It == Waypoints.end() || It->second.empty())
 			{
-				PlayerController->ClientMessage(FString(L"A saved waypoint with this phrase was not found!"), FName(), 1);
+				PlayerController->ClientMessage(FString(L"A saved waypoint with this phrase was not found!"), FName(), 1.f);
 				return;
 			}
 
@@ -1753,7 +1809,7 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 			{
 				if (WaypointList.size() < 2)
 				{
-					PlayerController->ClientMessage(FString(L"No previous waypoint available for this phrase!"), FName(), 1);
+					PlayerController->ClientMessage(FString(L"No previous waypoint available for this phrase!"), FName(), 1.f);
 					return;
 				}
 
@@ -1765,11 +1821,11 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 				{
 					Pawn->K2_TeleportTo(Destination, Pawn->K2_GetActorRotation(), false, true);
 					Pawn->LaunchCharacterJump(FVector(0.0f, 0.0f, -10000000.0f), false, nullptr, true);
-					PlayerController->ClientMessage(FString(L"Teleported to previous waypoint!"), FName(), 1);
+					PlayerController->ClientMessage(FString(L"Teleported to previous waypoint!"), FName(), 1.f);
 				}
 				else
 				{
-					PlayerController->ClientMessage(FString(L"Couldn't find a pawn to teleport!"), FName(), 1);
+					PlayerController->ClientMessage(FString(L"Couldn't find a pawn to teleport!"), FName(), 1.f);
 				}
 			}
 			else
@@ -1778,7 +1834,7 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 
 				if (Destination.X == 0.0f && Destination.Y == 0.0f && Destination.Z == 0.0f)
 				{
-					PlayerController->ClientMessage(FString(L"Waypoint is invalid (0, 0, 0)! Aborting teleport."), FName(), 1);
+					PlayerController->ClientMessage(FString(L"Waypoint is invalid (0, 0, 0)! Aborting teleport."), FName(), 1.f);
 					return;
 				}
 
@@ -1788,11 +1844,11 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 				{
 					Pawn->K2_TeleportTo(Destination, Pawn->K2_GetActorRotation(), false, true);
 					Pawn->LaunchCharacterJump(FVector(0.0f, 0.0f, -10000000.0f), false, nullptr, true);
-					PlayerController->ClientMessage(FString(L"Teleported to waypoint!"), FName(), 1);
+					PlayerController->ClientMessage(FString(L"Teleported to waypoint!"), FName(), 1.f);
 				}
 				else
 				{
-					PlayerController->ClientMessage(FString(L"Couldn't find a pawn to teleport!"), FName(), 1);
+					PlayerController->ClientMessage(FString(L"Couldn't find a pawn to teleport!"), FName(), 1.f);
 				}
 			}
 		}
@@ -1800,7 +1856,7 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 		{
 			if (args.size() != 2 && args.size() != 3)
 			{
-				PlayerController->ClientMessage(FString(L"Wrong number of arguments!"), FName(), 1);
+				PlayerController->ClientMessage(FString(L"Wrong number of arguments!"), FName(), 1.f);
 				return;
 			}
 
@@ -1819,14 +1875,14 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 			auto ItemEntry = AFortInventory::MakeItemEntry(ItemDefinition, Count, 0);
 			PlayerController->InternalPickup(ItemEntry);
 			free(ItemEntry);
-			PlayerController->ClientMessage(FString(L"Gave item!"), FName(), 1);
+			PlayerController->ClientMessage(FString(L"Gave item!"), FName(), 1.f);
 			//PlayerController->WorldInventory->GiveItem(ItemDefinition, Count);
 		}
 		else if (command == "spawnpickup")
 		{
 			if (args.size() != 2 && args.size() != 3)
 			{
-				PlayerController->ClientMessage(FString(L"Wrong number of arguments!"), FName(), 1);
+				PlayerController->ClientMessage(FString(L"Wrong number of arguments!"), FName(), 1.f);
 				return;
 			}
 
@@ -1845,14 +1901,14 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 			if (PlayerController->Pawn)
 			{
 				AFortInventory::SpawnPickup(PlayerController->Pawn->K2_GetActorLocation(), ItemDefinition, Count, 0, EFortPickupSourceTypeFlag::GetTossed(), EFortPickupSpawnSource::GetUnset(), PlayerController->Pawn);
-				PlayerController->ClientMessage(FString(L"Spawned pickup!"), FName(), 1);
+				PlayerController->ClientMessage(FString(L"Spawned pickup!"), FName(), 1.f);
 			}
 		}
 		else if (command == "spawnactor" || command == "summon")
 		{
 			if (args.size() != 2)
 			{
-				PlayerController->ClientMessage(FString(L"Wrong number of arguments!"), FName(), 1);
+				PlayerController->ClientMessage(FString(L"Wrong number of arguments!"), FName(), 1.f);
 				return;
 			}
 
@@ -1867,7 +1923,7 @@ void AFortPlayerControllerAthena::ServerCheat(UObject* Context, FFrame& Stack)
 			if (Class)
 			{
 				UWorld::SpawnActor(Class, Loc);
-				PlayerController->ClientMessage(FString(L"Spawned actor!"), FName(), 1);
+				PlayerController->ClientMessage(FString(L"Spawned actor!"), FName(), 1.f);
 			}
 			else
 			{
@@ -2313,7 +2369,7 @@ void AFortPlayerControllerAthena::EnterAircraft(UObject* Object, AActor* Aircraf
 	else
 		PlayerController = (AFortPlayerControllerAthena*)Object;
 
-	if (!FConfiguration::bKeepInventory)
+	if (!FConfiguration::bKeepInventory && PlayerController->WorldInventory)
 	{
 		UEAllocatedVector<FGuid> GuidsToRemove;
 		for (int i = 0; i < PlayerController->WorldInventory->Inventory.ReplicatedEntries.Num(); i++)
@@ -2338,6 +2394,122 @@ void AFortPlayerControllerAthena::EnterAircraft(UObject* Object, AActor* Aircraf
 	}
 
 	return EnterAircraftOG(Object, Aircraft);
+}
+
+void AFortPlayerControllerAthena::ServerTeleportToPlaygroundLobbyIsland(UObject* Context, FFrame& Stack)
+{
+	Stack.IncrementCode();
+	auto PlayerController = (AFortPlayerControllerAthena*)Context;
+	auto GameMode = (AFortGameModeAthena*)UWorld::GetWorld()->AuthorityGameMode;
+
+	if (PlayerController->WarmupPlayerStart)
+		PlayerController->Pawn->K2_TeleportTo(PlayerController->WarmupPlayerStart->K2_GetActorLocation(), PlayerController->Pawn->K2_GetActorRotation());
+	else
+	{
+		AActor* Actor = GameMode->ChoosePlayerStart(PlayerController);
+		PlayerController->Pawn->K2_TeleportTo(Actor->K2_GetActorLocation(), Actor->K2_GetActorRotation());
+	}
+}
+
+inline std::string CleanupString(std::string& s)
+{
+	if (s.rfind("Schematic:", 0) == 0)
+	{
+		s.erase(0, 10);
+	}
+	return s;
+}
+
+void AFortPlayerControllerAthena::ServerCraftSchematic(UObject* Context, FFrame& Stack)
+{
+	FString ItemId;
+	int32 PostCraftSlot;
+	bool bIsQuickCrafted;
+	Stack.StepCompiledIn(&ItemId);
+	Stack.StepCompiledIn(&PostCraftSlot);
+	Stack.StepCompiledIn(&bIsQuickCrafted);
+	Stack.IncrementCode();
+
+	auto PlayerController = (AFortPlayerControllerAthena*)Context;
+	auto SchematicStr = ItemId.ToString();
+	std::string SchematicStdStr = SchematicStr.c_str();
+
+	printf("CraftShit: ItemId='%s'\n", SchematicStdStr.c_str());
+
+	auto CleanedSchematic = CleanupString(SchematicStdStr);
+
+	printf("clean schematic broo: '%s'\n", CleanedSchematic.c_str());
+
+	auto Schematic = TUObjectArray::FindObject<UFortSchematicItemDefinition>(CleanedSchematic.c_str());
+	if (Schematic)
+	{
+		printf("schematic found : %s\n", Schematic->Name.ToString().c_str());
+
+		auto ResultItemDef = Schematic->GetResultWorldItemDefinition();
+
+		printf("item: %s\n", ResultItemDef->Name.ToString().c_str());
+
+		auto FoundItemDef = TUObjectArray::FindObject<UFortItemDefinition>(ResultItemDef->Name.ToString().c_str());
+		if (FoundItemDef) {
+			auto ExistingEntry = PlayerController->WorldInventory->Inventory.ReplicatedEntries.Search([&](FFortItemEntry& Entry)
+				{
+					return Entry.ItemDefinition == FoundItemDef;
+				}, FFortItemEntry::Size());
+
+			if (ExistingEntry)
+			{
+				ExistingEntry->Count += Schematic->GetQuantityProduced();
+				PlayerController->WorldInventory->UpdateEntry(*ExistingEntry);
+			}
+			else
+			{
+				PlayerController->WorldInventory->GiveItem(FoundItemDef, Schematic->GetQuantityProduced(), 0, 0, false);
+			}
+
+			auto RecipeTable = Schematic->CraftingRecipe.DataTable;
+			auto RowIterator = Schematic->CraftingRecipe.DataTable->RowMap.Find(Schematic->CraftingRecipe.RowName, [](const FName& Left, const FName& Right) {return Left == Right; });
+			auto RowPair = Schematic->CraftingRecipe.DataTable->RowMap[RowIterator.GetIndex()];
+			auto RecipeData = reinterpret_cast<FRecipe*>(RowPair.Value());
+			auto CostCount = RecipeData->RecipeCosts.Num();
+
+			printf("num costs: %d\n", CostCount);
+
+			for (int i = 0; i < RecipeData->RecipeCosts.Num(); i++)
+			{
+				auto& Cost = RecipeData->RecipeCosts.Get(i, FFortItemQuantityPair::Size());
+				auto CostItemDef = Cost.ItemDefinition.Get();
+				auto ItemEntry = AFortInventory::MakeItemEntry(CostItemDef, Cost.Quantity, 0);
+
+				FFortItemEntry* InventoryEntry = PlayerController->WorldInventory->Inventory.ReplicatedEntries.Search([&](FFortItemEntry& Entry)
+					{
+						return Entry.ItemDefinition == CostItemDef;
+					}, FFortItemEntry::Size());
+
+				if (InventoryEntry)
+				{
+					auto NewCount = InventoryEntry->Count - Cost.Quantity;
+					if (NewCount < 0)
+						NewCount = 0;
+					InventoryEntry->Count = NewCount;
+					PlayerController->WorldInventory->UpdateEntry(*InventoryEntry);
+				}
+			}
+		}
+	}
+}
+
+void AFortPlayerControllerAthena::ServerGiveCreativeItem(UObject* Context, FFrame& Stack)
+{
+	auto CreativeItem = (FFortItemEntry*)malloc(FFortItemEntry::Size());
+	memset(CreativeItem, 0, FFortItemEntry::Size());
+	FGuid ItemToRemoveGuid{};
+	Stack.StepCompiledIn(CreativeItem);
+	Stack.StepCompiledIn(&ItemToRemoveGuid);
+	Stack.IncrementCode();
+	auto PlayerController = (AFortPlayerControllerAthena*)Context;
+
+	PlayerController->WorldInventory->GiveItem(*CreativeItem);
+	free(CreativeItem);
 }
 
 void AFortPlayerControllerAthena::PostLoadHook()
@@ -2448,4 +2620,9 @@ void AFortPlayerControllerAthena::PostLoadHook()
 
 	Utils::ExecHook(GetDefaultObj()->GetFunction("SpawnToyInstance"), SpawnToyInstance);
 	Utils::Hook(FindEnterAircraft(), EnterAircraft, EnterAircraftOG);
+
+	Utils::ExecHook(GetDefaultObj()->GetFunction("ServerTeleportToPlaygroundLobbyIsland"), ServerTeleportToPlaygroundLobbyIsland);
+
+	Utils::ExecHook(GetDefaultObj()->GetFunction("ServerCraftSchematic"), ServerCraftSchematic);
+	Utils::ExecHook(GetDefaultObj()->GetFunction("ServerGiveCreativeItem"), ServerGiveCreativeItem);
 }

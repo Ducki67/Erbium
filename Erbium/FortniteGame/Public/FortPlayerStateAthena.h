@@ -6,8 +6,9 @@
 struct FUniqueNetIdRepl
 {
 public:
-    uint8 _Padding[0x18];
-    TArray<uint8> ReplicationBytes;
+    USCRIPTSTRUCT_COMMON_MEMBERS(FUniqueNetIdRepl);
+
+    DEFINE_STRUCT_PROP(ReplicationBytes, TArray<uint8>);
 };
 
 struct FDeathInfo
@@ -20,6 +21,7 @@ public:
     DEFINE_STRUCT_PROP(DeathLocation, FVector);
     DEFINE_STRUCT_PROP(DeathTags, FGameplayTagContainer);
     DEFINE_STRUCT_PROP(DeathCause, uint8);
+    DEFINE_STRUCT_PROP(DeathClassSlot, uint8);
     DEFINE_STRUCT_PROP(Downer, AActor*);
     DEFINE_STRUCT_PROP(FinisherOrDowner, AActor*);
     DEFINE_STRUCT_PROP(Distance, float);
@@ -73,4 +75,5 @@ public:
     DEFINE_FUNC(ClientReportTeamKill, void);
     DEFINE_FUNC(OnRep_Place, void);
     DEFINE_FUNC(OnRep_SeasonLevelUIDisplay, void);
+    DEFINE_FUNC(OnRep_PlayerName, void);
 };

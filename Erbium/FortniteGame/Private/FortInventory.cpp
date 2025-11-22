@@ -215,7 +215,7 @@ void AFortInventory::RemoveWeaponAbilities(AActor* Weapon__Uncasted)
         Weapon->EquippedAbilityHandles.ResetNum();
     }
 
-    if (Weapon->WeaponData->EquippedAbilitySet)
+    /*if (Weapon->WeaponData->EquippedAbilitySet)
     {
         bool bRemoved = false;
         for (auto& [Key, Value] : *(TMap<FGuid, FFortAbilitySetHandle>*)& PlayerController->AppliedInGameModifierAbilitySetHandles)
@@ -228,7 +228,7 @@ void AFortInventory::RemoveWeaponAbilities(AActor* Weapon__Uncasted)
 
         if (bRemoved)
             PlayerController->ClientRemoveItemAbilitySet(Weapon->WeaponData->EquippedAbilitySet, Weapon->ItemEntryGuid);
-    }
+    }*/
     if (Weapon->EquippedAbilitySetHandles.Num())
     {
         for (int i = 0; i < Weapon->EquippedAbilitySetHandles.Num(); i++)
@@ -357,6 +357,15 @@ FFortItemEntry* AFortInventory::MakeItemEntry(const UFortItemDefinition* ItemDef
                 ItemEntry->PhantomReserveAmmo = (Stats->InitialClips - 1) * Stats->ClipSize;
         }
     }
+    if (auto WeaponDef = ItemDef->Cast<UFortWeaponItemDefinition>())
+        if (WeaponDef->HasWeaponModSlots() && FFortItemEntry::HasWeaponModSlots())
+            ItemEntry->WeaponModSlots = WeaponDef->WeaponModSlots;
+    if (ItemEntry->HasPickupVariantIndex())
+        ItemEntry->PickupVariantIndex = -1;
+    if (ItemEntry->HasItemVariantDataMappingIndex())
+        ItemEntry->ItemVariantDataMappingIndex = -1;
+    if (ItemEntry->HasOrderIndex())
+        ItemEntry->OrderIndex = -1;
 
     return ItemEntry;
 }
@@ -516,6 +525,7 @@ bool AFortInventory::IsPrimaryQuickbar(const UFortItemDefinition* ItemDefinition
         ItemDefinition->ItemType == EFortItemType::GetTrap() ||
         ItemDefinition->ItemType == EFortItemType::GetBuildingPiece() ||
         ItemDefinition->ItemType == EFortItemType::GetEditTool() ||
+        ItemDefinition->ItemType == EFortItemType::GetIngredient() ||
         (ItemDefinition->HasbForceIntoOverflow() && ItemDefinition->bForceIntoOverflow)
         ? false : true;
 }
@@ -556,8 +566,6 @@ bool RemoveInventoryItem(IInterface* Interface, FGuid& ItemGuid, int Count, bool
         { return entry->ItemEntry.ItemGuid == ItemGuid; });
     auto itemEntry = PlayerController->WorldInventory->Inventory.ReplicatedEntries.Search([&](FFortItemEntry& entry)
         { return entry.ItemGuid == ItemGuid; }, FFortItemEntry::Size());
-
-    printf("K2_RemoveItemFromPlayerByGuid %s %d\n", itemEntry->ItemDefinition->Name.ToString().c_str(), Count);
 
     if (ItemP)
     {

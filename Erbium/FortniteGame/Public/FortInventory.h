@@ -39,6 +39,7 @@ public:
     DEFINE_ENUM_PROP(Trap);
     DEFINE_ENUM_PROP(Ammo);
     DEFINE_ENUM_PROP(BuildingPiece);
+    DEFINE_ENUM_PROP(Ingredient);
 };
 
 class EFortRarity
@@ -95,6 +96,38 @@ public:
     UCLASS_COMMON_MEMBERS(UFortWorldItemDefinition);
 };
 
+struct FFortItemQuantityPair
+{
+public:
+    USCRIPTSTRUCT_COMMON_MEMBERS(FFortItemQuantityPair);
+
+    DEFINE_STRUCT_PROP(ItemDefinition, TSoftObjectPtr<UFortItemDefinition>);
+    DEFINE_STRUCT_PROP(Quantity, int32);
+};
+
+class UFortSchematicItemDefinition : public UFortItemDefinition
+{
+public:
+    UCLASS_COMMON_MEMBERS(UFortSchematicItemDefinition);
+
+    DEFINE_PROP(CraftingRecipe, FDataTableRowHandle);
+
+    DEFINE_FUNC(GetResultWorldItemDefinition, UFortWorldItemDefinition*)
+    DEFINE_FUNC(GetQuantityProduced, int32);
+};
+
+struct FRecipe : public FTableRowBase
+{
+public:
+    USCRIPTSTRUCT_COMMON_MEMBERS(FRecipe);
+
+    DEFINE_STRUCT_PROP(RecipeResults, TArray<FFortItemQuantityPair>);
+    DEFINE_STRUCT_PROP(bIsConsumed, bool);
+    DEFINE_STRUCT_PROP(RecipeCosts, TArray<FFortItemQuantityPair>);
+    DEFINE_STRUCT_PROP(RequiredCatalysts, FGameplayTagContainer);
+    DEFINE_STRUCT_PROP(Score, int32);
+};
+
 struct FFortItemEntryStateValue
 {
 public:
@@ -124,6 +157,9 @@ public:
     DEFINE_STRUCT_PROP(bIsReplicatedCopy, bool);
     DEFINE_STRUCT_PROP(bIsDirty, bool);
     DEFINE_STRUCT_PROP(WeaponModSlots, TArray<void*>);
+    DEFINE_STRUCT_PROP(PickupVariantIndex, int32);
+    DEFINE_STRUCT_PROP(OrderIndex, int16);
+    DEFINE_STRUCT_PROP(ItemVariantDataMappingIndex, int32);
 };
 
 class UFortWorldItem : public UObject
