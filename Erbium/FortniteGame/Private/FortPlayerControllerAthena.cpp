@@ -167,6 +167,7 @@ void AFortPlayerControllerAthena::ServerAcknowledgePossession(UObject* Context, 
 	}
 }
 
+uint32 ServerAttemptAircraftJumpVft;
 void AFortPlayerControllerAthena::ServerAttemptAircraftJump_(UObject* Context, FFrame& Stack)
 {
 	FRotator Rotation;
@@ -190,81 +191,45 @@ void AFortPlayerControllerAthena::ServerAttemptAircraftJump_(UObject* Context, F
 
 		if (PlayerController->MyFortPawn)
 		{
-			if (VersionInfo.FortniteVersion >= 25.20)
-			{
-				static auto Effect = FindObject<UClass>(L"/Game/Athena/SafeZone/GE_OutsideSafeZoneDamage.GE_OutsideSafeZoneDamage_C");
-
-				bool Found = false;
-				auto AbilitySystemComponent = PlayerController->PlayerState->AbilitySystemComponent;
-
-				for (int i = 0; i < AbilitySystemComponent->ActiveGameplayEffects.GameplayEffects_Internal.Num(); i++)
-				{
-					auto& ActiveEffect = AbilitySystemComponent->ActiveGameplayEffects.GameplayEffects_Internal.Get(i, FActiveGameplayEffect::Size());
-
-					if (ActiveEffect.Spec.Def)
-						if (ActiveEffect.Spec.Def->IsA(Effect))
-						{
-							Found = true;
-							break;
-						}
-				}
-
-				if (!Found)
-				{
-					printf("yo\n");
-					auto EffectHandle = FGameplayEffectContextHandle();
-					auto SpecHandle = AbilitySystemComponent->BP_ApplyGameplayEffectToSelf(Effect, 0.f, EffectHandle);
-
-					//AbilitySystemComponent->SetActiveGameplayEffectLevel(SpecHandle, 1);
-
-					AbilitySystemComponent->UpdateActiveGameplayEffectSetByCallerMagnitude(SpecHandle,
-						FGameplayTag(FName(L"SetByCaller.StormCampingDamage")), 1);
-				}
-
-				PlayerController->MyFortPawn->bIsInAnyStorm = false;
-				PlayerController->MyFortPawn->OnRep_IsInAnyStorm();
-				PlayerController->MyFortPawn->bIsInsideSafeZone = true;
-				PlayerController->MyFortPawn->OnRep_IsInsideSafeZone();
-			}
 
 			PlayerController->MyFortPawn->BeginSkydiving(true);
 			PlayerController->MyFortPawn->SetHealth(100.f);
-			
-			if (FConfiguration::bLateGame)
-			{
-				PlayerController->MyFortPawn->SetShield(100.f);
-				auto Aircraft = GameState->HasAircrafts() ? GameState->Aircrafts[0] : (GameState->HasAircraft() ? GameState->Aircraft : nullptr);
-				if (!Aircraft) // gamephaselogic builds
-				{
-					auto GamePhaseLogic = UFortGameStateComponent_BattleRoyaleGamePhaseLogic::Get(UWorld::GetWorld());
-
-					Aircraft = GamePhaseLogic->Aircrafts_GameState[0].Get();
-				}
-
-				FVector AircraftLocation = Aircraft->K2_GetActorLocation();
-
-				float Angle = (float)rand() / 5215.03002625f;
-				float Radius = (float)(rand() % 1000);
-
-				float OffsetX = cosf(Angle) * Radius;
-				float OffsetY = sinf(Angle) * Radius;
-
-				FVector Offset;
-				Offset.X = OffsetX;
-				Offset.Y = OffsetY;
-				Offset.Z = 0.0f;
-
-				FVector NewLoc = AircraftLocation + Offset;
-
-				PlayerController->MyFortPawn->K2_SetActorLocation(NewLoc, false, nullptr, true);
-			}
 		}
 	}
 	else
 	{
-		static auto ServerAttemptAircraftJumpOG = (void(*)(AFortPlayerControllerAthena*, FRotator&)) ((AFortPlayerControllerAthena*)Context)->Vft[((AFortPlayerControllerAthena*)Context)->GetFunction("ServerAttemptAircraftJump")->GetVTableIndex()];
+		static auto ServerAttemptAircraftJumpOG = (void(*)(AFortPlayerControllerAthena*, FRotator&)) ((AFortPlayerControllerAthena*)Context)->Vft[ServerAttemptAircraftJumpVft];
 
 		ServerAttemptAircraftJumpOG((AFortPlayerControllerAthena*)Context, Rotation);
+	}
+	
+	if (FConfiguration::bLateGame)
+	{
+		PlayerController->MyFortPawn->SetShield(100.f);
+		auto Aircraft = GameState->HasAircrafts() ? GameState->Aircrafts[0] : (GameState->HasAircraft() ? GameState->Aircraft : nullptr);
+		if (!Aircraft) // gamephaselogic builds
+		{
+			auto GamePhaseLogic = UFortGameStateComponent_BattleRoyaleGamePhaseLogic::Get(UWorld::GetWorld());
+
+			Aircraft = GamePhaseLogic->Aircrafts_GameState[0].Get();
+		}
+
+		FVector AircraftLocation = Aircraft->K2_GetActorLocation();
+
+		float Angle = (float)rand() / 5215.03002625f;
+		float Radius = (float)(rand() % 1000);
+
+		float OffsetX = cosf(Angle) * Radius;
+		float OffsetY = sinf(Angle) * Radius;
+
+		FVector Offset;
+		Offset.X = OffsetX;
+		Offset.Y = OffsetY;
+		Offset.Z = 0.0f;
+
+		FVector NewLoc = AircraftLocation + Offset;
+
+		PlayerController->MyFortPawn->K2_SetActorLocation(NewLoc, false, nullptr, true);
 	}
 }
 
@@ -2508,7 +2473,7 @@ void AFortPlayerControllerAthena::ServerGiveCreativeItem(UObject* Context, FFram
 	Stack.IncrementCode();
 	auto PlayerController = (AFortPlayerControllerAthena*)Context;
 
-	PlayerController->WorldInventory->GiveItem(*CreativeItem);
+	PlayerController->InternalPickup(CreativeItem);
 	free(CreativeItem);
 }
 
@@ -2547,6 +2512,9 @@ void AFortPlayerControllerAthena::PostLoadHook()
 
 	//if (VersionInfo.FortniteVersion >= 11)
 	//{
+	if (VersionInfo.FortniteVersion < 11)
+		ServerAttemptAircraftJumpVft = GetDefaultObj()->GetFunction("ServerAttemptAircraftJump")->GetVTableIndex();
+	
 	auto ServerAttemptAircraftJumpPC = GetDefaultObj()->GetFunction("ServerAttemptAircraftJump");
 	if (!ServerAttemptAircraftJumpPC)
 		Utils::ExecHook(DefaultObjImpl("FortControllerComponent_Aircraft")->GetFunction("ServerAttemptAircraftJump"), ServerAttemptAircraftJump_, ServerAttemptAircraftJump_OG);

@@ -683,10 +683,10 @@ void UFortGameStateComponent_BattleRoyaleGamePhaseLogic::Tick()
 						if (Pawn->bIsInsideSafeZone != bInZone || Pawn->bIsInAnyStorm != !bInZone)
 						{
 							printf("Pawn %s new storm status: %s\n", Pawn->Name.ToString().c_str(), bInZone ? "true" : "false");
-							Pawn->bIsInAnyStorm = !bInZone;
+							/*Pawn->bIsInAnyStorm = !bInZone;
 							Pawn->OnRep_IsInAnyStorm();
 							Pawn->bIsInsideSafeZone = bInZone;
-							Pawn->OnRep_IsInsideSafeZone();
+							Pawn->OnRep_IsInsideSafeZone();*/
 
 							/*auto AbilitySystemComponent = Player->PlayerState->AbilitySystemComponent;
 							for (int i = 0; i < AbilitySystemComponent->ActiveGameplayEffects.GameplayEffects_Internal.Num(); i++)
@@ -701,7 +701,7 @@ void UFortGameStateComponent_BattleRoyaleGamePhaseLogic::Tick()
 
 									AbilitySystemComponent->SetActiveGameplayEffectLevel(Handle, SafeZoneIndicator->CurrentPhase);
 
-									AbilitySystemComponent->UpdateActiveGameplayEffectSetByCallerMagnitude(Handle, FGameplayTag(FName(L"SetByCaller.StormCampingDamage")), 1);
+									AbilitySystemComponent->UpdateActiveGameplayEffectSetByCallerMagnitude(Handle, FGameplayTag(FName(L"SetByCaller.StormCampingDamage")), 1.f);
 									printf("found\n");
 									break;
 								}
